@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Store
+GenericName=Software Store
+Comment=Discover and manage apps for Omarchy
+Exec=nixe-store
+Icon=io.github.design_nexus.nixe.Store
+Terminal=false
+Categories=System;PackageManager;
+Keywords=apps;software;packages;Arch;AUR;Omarchy;
+StartupNotify=true
+StartupWMClass=io.github.design_nexus.nixe.Store

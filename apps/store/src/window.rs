@@ -1,0 +1,1609 @@
+#[path = "blackarch_dialog.rs"]
+mod blackarch_dialog;
+#[path = "home.rs"]
+mod home;
+use crate::{prefs, theme, widgets};
+use gtk::{gdk, gio, glib, prelude::*};
+use nixe_store::{
+    aur::{self, Recipe},
+    catalog::{self, Catalog},
+    model::{App, Event, Plan, Request},
+    repositories, transaction,
+};
+use nixe_ui::chrome;
+use std::{
+    cell::{Cell, RefCell},
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    rc::Rc,
+    sync::mpsc,
+};
+
+const PAGES: &[(&str, &str, &str)] = &[
+    ("home", "Home", "go-home-symbolic"),
+    ("categories", "Categories", "view-grid-symbolic"),
+    ("installed", "Installed", "emblem-default-symbolic"),
+    ("updates", "Updates", "software-update-available-symbolic"),
+    ("repositories", "Repositories", "network-server-symbolic"),
+];
+pub const SHORTCUTS: &[(&str, &str)] = &[
+    ("Ctrl+F", "Search apps"),
+    ("Ctrl+B", "Collapse sidebar"),
+    ("Alt+Left", "Back to Home"),
+    ("Ctrl+R", "Refresh catalog"),
+    ("Ctrl+,", "Settings"),
+    ("Ctrl+Shift+P", "Command palette"),
+    ("Esc", "Close panel or clear search"),
+    ("F1 / ?", "Keyboard shortcuts"),
+    ("Ctrl+Q / Ctrl+W", "Close Store"),
+];
+
+struct Ui {
+    window: gtk::ApplicationWindow,
+    overlay: gtk::Overlay,
+    nav: gtk::Box,
+    head: gtk::Box,
+    nav_buttons: Vec<(String, gtk::Button)>,
+    body: gtk::Box,
+    scroll: gtk::ScrolledWindow,
+    search: gtk::SearchEntry,
+    source: gtk::DropDown,
+    packages: gtk::CheckButton,
+    status: gtk::Label,
+    notice: gtk::Label,
+    spinner: gtk::Spinner,
+    progress: gtk::ProgressBar,
+    toast: gtk::Label,
+    catalog: RefCell<Option<Catalog>>,
+    page: RefCell<String>,
+    category: RefCell<String>,
+    aur: RefCell<Vec<App>>,
+    aur_updates: RefCell<Vec<App>>,
+    search_generation: Cell<u64>,
+    busy: Cell<bool>,
+    loading: Cell<bool>,
+    committed: Cell<bool>,
+    cancel_button: gtk::Button,
+    cancelled: RefCell<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    confirmation: RefCell<Option<mpsc::Sender<Option<Plan>>>>,
+    pending_recipe: RefCell<Option<Recipe>>,
+    queue: RefCell<VecDeque<Request>>,
+}
+thread_local! { static UI: RefCell<Option<Rc<Ui>>> = const { RefCell::new(None) }; }
+fn ui() -> Rc<Ui> {
+    UI.with(|u| u.borrow().as_ref().unwrap().clone())
+}
+
+pub fn present(app: &gtk::Application, section: Option<&str>, query: Option<&str>) {
+    if UI.with(|u| u.borrow().is_none()) {
+        build(app);
+        refresh(false);
+    }
+    let u = ui();
+    if let Some(section) = section {
+        navigate(section);
+    }
+    if let Some(q) = query {
+        u.search.set_visible(true);
+        u.search.set_text(q);
+        navigate("search");
+    }
+    u.window.present();
+    if let Some(out) = std::env::var_os("STORE_SNAPSHOT") {
+        snapshot(std::path::PathBuf::from(out));
+    }
+}
+
+fn build(app: &gtk::Application) {
+    theme::install();
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .default_width(std::env::var("STORE_SNAPSHOT_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1120))
+        .default_height(800)
+        .title("Store")
+        .build();
+    window.set_titlebar(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
+    window.add_css_class("store-window");
+    let overlay = gtk::Overlay::new();
+    let frame = widgets::vbox(0);
+    frame.add_css_class("window-frame");
+    frame.add_css_class("store-frame");
+    let body_row = widgets::hbox(0);
+    body_row.set_vexpand(true);
+    let nav = widgets::vbox(0);
+    nav.add_css_class("settings-navigation");
+    nav.set_hexpand(false);
+    let head = chrome::sidebar_head("Store", Some("Search apps (Ctrl+F)"));
+    nav.append(&head.root);
+    let list = widgets::vbox(0);
+    list.set_hexpand(false);
+    let mut nav_buttons = Vec::new();
+    for &(id, title, icon) in PAGES {
+        let button = gtk::Button::new();
+        button.add_css_class("nav-item");
+        button.set_tooltip_text(Some(title));
+        let row = widgets::hbox(12);
+        row.append(&gtk::Image::from_icon_name(icon));
+        let label = widgets::label(title, "nav-label");
+        label.add_css_class("compact-hide");
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_xalign(0.0);
+        row.append(&label);
+        button.set_child(Some(&row));
+        button.connect_clicked(move |_| navigate(id));
+        list.append(&button);
+        nav_buttons.push((id.into(), button));
+    }
+    let nav_scroll = gtk::ScrolledWindow::builder()
+        .hexpand(false)
+        .vexpand(true)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::External)
+        .child(&list)
+        .build();
+    nav.append(&nav_scroll);
+    body_row.append(&nav);
+    let column = widgets::vbox(0);
+    column.add_css_class("settings-content");
+    column.set_hexpand(true);
+    let search = gtk::SearchEntry::new();
+    search.set_placeholder_text(Some("Search apps and AUR…"));
+    search.set_visible(false);
+    column.append(&chrome::search_strip(&search));
+    let toolbar = widgets::hbox(8);
+    toolbar.add_css_class("toolbar");
+    let source = gtk::DropDown::from_strings(&["All sources", "AUR"]);
+    source.set_tooltip_text(Some("Filter by repository"));
+    toolbar.append(&source);
+    let packages = gtk::CheckButton::with_label("Include packages");
+    packages.set_tooltip_text(Some("Include command-line tools, libraries and system packages in search"));
+    toolbar.append(&packages);
+    let space = widgets::hbox(0);
+    space.set_hexpand(true);
+    toolbar.append(&space);
+    let refresh_button = widgets::bar_button("view-refresh-symbolic", "Refresh catalog (Ctrl+R)");
+    refresh_button.connect_clicked(|_| refresh(true));
+    toolbar.append(&refresh_button);
+    column.append(&toolbar);
+    let notice_label = widgets::label("", "store-notice");
+    notice_label.set_wrap(true);
+    notice_label.set_xalign(0.0);
+    notice_label.set_visible(false);
+    column.append(&notice_label);
+    let progress = gtk::ProgressBar::new();
+    progress.add_css_class("store-progress");
+    progress.set_visible(false);
+    column.append(&progress);
+    let body = widgets::vbox(0);
+    body.add_css_class("settings-page");
+    body.set_hexpand(true);
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&body)
+        .vexpand(true)
+        .hexpand(true)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::External)
+        .build();
+    column.append(&scroll);
+    body_row.append(&column);
+    frame.append(&body_row);
+    let bar = widgets::hbox(8);
+    bar.add_css_class("status-bar");
+    let help = gtk::Button::with_label("F1 Shortcuts");
+    help.add_css_class("bar-button");
+    help.connect_clicked(|_| shortcuts());
+    bar.append(&help);
+    let status = widgets::label("Loading apps…", "dim");
+    status.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    status.set_hexpand(true);
+    status.set_xalign(1.0);
+    bar.append(&status);
+    let spinner = gtk::Spinner::new();
+    bar.append(&spinner);
+    let cancel_button = button("Cancel", cancel_operation);
+    cancel_button.set_visible(false);
+    bar.append(&cancel_button);
+    bar.append(&chrome::gear(settings));
+    frame.append(&bar);
+    overlay.set_child(Some(&frame));
+    let toast_label = widgets::label("", "store-toast");
+    toast_label.set_wrap(true);
+    toast_label.set_halign(gtk::Align::Center);
+    toast_label.set_valign(gtk::Align::End);
+    toast_label.set_margin_bottom(48);
+    toast_label.set_visible(false);
+    overlay.add_overlay(&toast_label);
+    window.set_child(Some(&overlay));
+    let p = prefs::get();
+    let first = nixe_theme::start_page("home", &p.last_section);
+    let u = Rc::new(Ui {
+        window: window.clone(),
+        overlay: overlay.clone(),
+        nav: nav.clone(),
+        head: head.root.clone(),
+        nav_buttons,
+        body,
+        scroll,
+        search: search.clone(),
+        source: source.clone(),
+        packages: packages.clone(),
+        status,
+        notice: notice_label,
+        spinner,
+        progress,
+        toast: toast_label,
+        catalog: RefCell::new(None),
+        page: RefCell::new(first),
+        category: RefCell::new(String::new()),
+        aur: RefCell::new(Vec::new()),
+        aur_updates: RefCell::new(Vec::new()),
+        search_generation: Cell::new(0),
+        busy: Cell::new(false),
+        loading: Cell::new(false),
+        committed: Cell::new(false),
+        cancel_button,
+        cancelled: RefCell::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))),
+        confirmation: RefCell::new(None),
+        pending_recipe: RefCell::new(None),
+        queue: RefCell::new(VecDeque::new()),
+    });
+    UI.with(|v| *v.borrow_mut() = Some(u.clone()));
+    head.toggle.connect_clicked(|_| toggle_sidebar());
+    head.search.unwrap().connect_clicked(|_| find());
+    source.connect_selected_notify(|_| {
+        if selected_source().is_some() && ui().page.borrow().as_str() == "home" {
+            navigate("search");
+        } else {
+            render();
+        }
+    });
+    packages.connect_toggled(|_| render());
+    search.connect_search_changed(|entry| {
+        let u = ui();
+        if !entry.text().is_empty() {
+            *u.page.borrow_mut() = "search".into();
+        } else if u.page.borrow().as_str() == "search" {
+            *u.page.borrow_mut() = "home".into();
+        }
+        u.aur.borrow_mut().clear();
+        render();
+        let generation = u.search_generation.get() + 1;
+        u.search_generation.set(generation);
+        let query = entry.text().to_string();
+        if query.chars().count() >= 2 {
+            glib::timeout_add_local_once(std::time::Duration::from_millis(350), move || {
+                if ui().search_generation.get() != generation {
+                    return;
+                }
+                let (tx, rx) = async_channel::bounded(1);
+                std::thread::spawn(move || {
+                    let _ = tx.send_blocking(aur::search(&query).map_err(|e| e.to_string()));
+                });
+                glib::spawn_future_local(async move {
+                    if let Ok(result) = rx.recv().await {
+                        if ui().search_generation.get() == generation {
+                            match result {
+                                Ok(mut apps) => {
+                                    if let Some(c) = ui().catalog.borrow().as_ref() {
+                                        for a in &mut apps {
+                                            a.installed = c.installed.get(&a.package).map(|p| p.version.clone());
+                                            let base = a.package.trim_end_matches("-bin").trim_end_matches("-git");
+                                            if let Some(meta) = c.apps.iter().find(|p| p.desktop && p.package == base) {
+                                                a.desktop = true;
+                                                a.icon = meta.icon.clone();
+                                                a.category = meta.category.clone();
+                                            }
+                                        }
+                                    }
+                                    *ui().aur.borrow_mut() = apps;
+                                    render();
+                                }
+                                Err(e) => notice(&e),
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(|_, key, _, mods| {
+        let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
+        match key {
+            gdk::Key::f if ctrl => find(),
+            gdk::Key::b if ctrl => toggle_sidebar(),
+            gdk::Key::r if ctrl => refresh(true),
+            gdk::Key::F1 => shortcuts(),
+            gdk::Key::Left if mods.contains(gdk::ModifierType::ALT_MASK) => navigate("home"),
+            gdk::Key::Escape => {
+                if nixe_ui::settings_card::is_open() {
+                    nixe_ui::settings_card::escape();
+                } else {
+                    let u = ui();
+                    u.search.set_text("");
+                    u.search.set_visible(false);
+                    navigate("home");
+                }
+            }
+            _ => return glib::Propagation::Proceed,
+        }
+        glib::Propagation::Stop
+    });
+    window.add_controller(keys);
+    nixe_ui::keys::install(
+        &window,
+        nixe_ui::keys::Common { settings: Some(settings), shortcuts: Some(shortcuts), close: true, ..Default::default() },
+    );
+    window.connect_close_request(|_| {
+        if ui().busy.get() {
+            toast("Wait for the current operation to finish, or cancel its review.");
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    let probe = gtk::DrawingArea::new();
+    probe.set_can_target(false);
+    probe.set_can_focus(false);
+    overlay.add_overlay(&probe);
+    overlay.set_measure_overlay(&probe, false);
+    probe.connect_resize(|_, _, _| {
+        glib::idle_add_local_once(responsive);
+    });
+    window.connect_default_width_notify(|_| responsive());
+    window.connect_realize(|_| responsive());
+    let weak = window.downgrade();
+    glib::timeout_add_local(std::time::Duration::from_millis(1500), move || {
+        if weak.upgrade().is_none() {
+            return glib::ControlFlow::Break;
+        }
+        responsive();
+        glib::ControlFlow::Continue
+    });
+    responsive();
+    render();
+}
+
+fn find() {
+    let u = ui();
+    u.search.set_visible(true);
+    u.search.grab_focus();
+}
+fn toggle_sidebar() {
+    prefs::update(|p| p.sidebar_collapsed = !p.sidebar_collapsed);
+    responsive();
+}
+fn responsive() {
+    let u = ui();
+    let width = if u.window.width() > 0 { u.window.width() } else { u.window.default_width() };
+    let compact = (width > 0 && width < 980) || prefs::get().sidebar_collapsed;
+    nixe_ui::settings_card::fit(&u.window);
+    if compact {
+        u.nav.add_css_class("compact");
+    } else {
+        u.nav.remove_css_class("compact");
+    }
+    chrome::set_head_compact(&u.head, compact);
+    fn hide(widget: &gtk::Widget, compact: bool) {
+        if widget.has_css_class("nav-item") {
+            if let Some(content) = widget.downcast_ref::<gtk::Button>().and_then(|b| b.child()) {
+                content.set_halign(if compact { gtk::Align::Center } else { gtk::Align::Fill });
+            }
+        }
+        let mut c = widget.first_child();
+        while let Some(child) = c {
+            if child.has_css_class("compact-hide") {
+                child.set_visible(!compact);
+            }
+            hide(&child, compact);
+            c = child.next_sibling();
+        }
+    }
+    hide(u.nav.upcast_ref(), compact);
+    if width > 0 && width < 980 {
+        u.body.add_css_class("narrow");
+    } else {
+        u.body.remove_css_class("narrow");
+    }
+    u.packages.set_label(Some(if width > 0 && width < 900 { "Packages" } else { "Include packages" }));
+}
+fn navigate(page: &str) {
+    if page == "settings" {
+        settings();
+        return;
+    }
+    let u = ui();
+    *u.page.borrow_mut() = page.into();
+    u.category.borrow_mut().clear();
+    if page != "search" {
+        u.search.set_text("");
+        *u.page.borrow_mut() = page.into();
+    }
+    prefs::update(|p| p.last_section = page.into());
+    u.scroll.vadjustment().set_value(0.0);
+    render();
+}
+fn notice(message: &str) {
+    let u = ui();
+    u.notice.set_text(message);
+    u.notice.set_visible(!message.is_empty());
+}
+fn toast(message: &str) {
+    let u = ui();
+    u.toast.set_text(message);
+    u.toast.set_visible(true);
+    glib::timeout_add_local_once(std::time::Duration::from_millis(6000), move || u.toast.set_visible(false));
+}
+fn busy(on: bool) {
+    let u = ui();
+    u.busy.set(on);
+    u.cancel_button.set_visible(on && !u.committed.get());
+    u.spinner.set_spinning(on || u.loading.get());
+    u.progress.set_visible(on);
+    if on {
+        u.progress.pulse();
+    }
+}
+
+fn refresh(network: bool) {
+    let u = ui();
+    if u.busy.get() || u.loading.replace(true) {
+        return;
+    }
+    u.spinner.start();
+    u.status.set_text(if network { "Refreshing apps and repository metadata…" } else { "Loading apps…" });
+    notice("");
+    let cache = nixe_core::paths::cache_dir();
+    let bootstrap = !network && !cache.join("appstream.pkg.tar.zst").exists() && std::env::var_os("STORE_SNAPSHOT").is_none();
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(catalog::load(&cache, network).map_err(|e| e.to_string()));
+    });
+    glib::spawn_future_local(async move {
+        if let Ok(result) = rx.recv().await {
+            let u = ui();
+            u.loading.set(false);
+            u.spinner.set_spinning(u.busy.get());
+            match result {
+                Ok(catalog) => {
+                    let warning = catalog.warning.clone();
+                    *u.catalog.borrow_mut() = Some(catalog);
+                    update_sources();
+                    notice(&warning);
+                    render();
+                    if bootstrap {
+                        refresh(true);
+                    }
+                }
+                Err(e) => {
+                    u.status.set_text("Catalog unavailable");
+                    notice(&e);
+                }
+            }
+        }
+    });
+}
+
+fn heading(title: &str, note: &str) {
+    let u = ui();
+    let g = widgets::vbox(0);
+    g.add_css_class("settings-group");
+    let l = widgets::label(&title.to_uppercase(), "group-title");
+    l.set_xalign(0.0);
+    g.append(&l);
+    if !note.is_empty() {
+        let n = widgets::label(note, "collection-note");
+        n.set_wrap(true);
+        n.set_xalign(0.0);
+        g.append(&n);
+    }
+    u.body.append(&g);
+}
+fn text(message: &str) {
+    let l = widgets::label(message, "empty-state");
+    l.set_wrap(true);
+    ui().body.append(&l);
+}
+fn button(label: &str, action: impl Fn() + 'static) -> gtk::Button {
+    let b = gtk::Button::with_label(label);
+    b.connect_clicked(move |_| action());
+    b
+}
+fn selected_source() -> Option<String> {
+    ui().source
+        .selected_item()
+        .and_downcast::<gtk::StringObject>()
+        .map(|item| item.string().to_string())
+        .filter(|name| name != "All sources")
+        .map(|name| if name == "AUR" { "aur".into() } else { name })
+}
+fn update_sources() {
+    let u = ui();
+    let selected = selected_source();
+    let mut names = vec!["All sources".to_string()];
+    if let Some(catalog) = u.catalog.borrow().as_ref() {
+        for repository in catalog.repositories.iter().filter(|r| r.enabled) {
+            if !names.contains(&repository.name) {
+                names.push(repository.name.clone());
+            }
+        }
+    }
+    names.push("AUR".into());
+    let position = selected.and_then(|name| names.iter().position(|n| n == &name || (n == "AUR" && name == "aur"))).unwrap_or(0);
+    let _notifications = u.source.freeze_notify();
+    u.source.set_model(Some(&gtk::StringList::new(&names.iter().map(String::as_str).collect::<Vec<_>>())));
+    u.source.set_selected(position as u32);
+}
+fn source_match(a: &App) -> bool {
+    selected_source().is_none_or(|source| source == a.source)
+}
+
+fn render() {
+    let u = ui();
+    while let Some(c) = u.body.first_child() {
+        u.body.remove(&c);
+    }
+    let page = u.page.borrow().clone();
+    for (id, b) in &u.nav_buttons {
+        if id == &page {
+            b.add_css_class("active");
+        } else {
+            b.remove_css_class("active");
+        }
+    }
+    chrome::set_title(&u.window, "Store", PAGES.iter().find(|p| p.0 == page).map(|p| p.1).unwrap_or("Search"));
+    let c = u.catalog.borrow();
+    let Some(c) = c.as_ref() else {
+        text("Loading your app catalog…");
+        return;
+    };
+    match page.as_str() {
+        "repositories" => render_repositories(c),
+        "updates" => render_updates(c),
+        "categories" if u.category.borrow().is_empty() => {
+            heading("Categories", "Find the right app for what you want to do.");
+            let grid = gtk::FlowBox::builder()
+                .selection_mode(gtk::SelectionMode::None)
+                .min_children_per_line(1)
+                .max_children_per_line(3)
+                .column_spacing(12)
+                .row_spacing(12)
+                .homogeneous(true)
+                .build();
+            for &(name, icon) in catalog::CATEGORIES {
+                let tile = gtk::Button::new();
+                tile.add_css_class("app-tile");
+                let row = widgets::hbox(12);
+                row.append(&gtk::Image::from_icon_name(icon));
+                row.append(&widgets::label(name, "app-name"));
+                tile.set_child(Some(&row));
+                tile.connect_clicked(move |_| {
+                    *ui().category.borrow_mut() = name.into();
+                    render();
+                });
+                grid.insert(&tile, -1);
+            }
+            u.body.append(&grid);
+        }
+        "home" => home::render(c),
+        _ => {
+            let query = u.search.text().to_lowercase();
+            let category = u.category.borrow().clone();
+            heading(
+                if page == "installed" {
+                    "Your apps"
+                } else if page == "categories" {
+                    &category
+                } else {
+                    "Search results"
+                },
+                if page == "installed" { "Desktop apps installed on this computer." } else { "" },
+            );
+            let mut apps = Vec::new();
+            let mut seen = BTreeSet::new();
+            for a in c.apps.iter().chain(u.aur.borrow().iter()) {
+                if !source_match(a) {
+                    continue;
+                }
+                if page == "installed" {
+                    if a.installed.is_none() || !a.desktop {
+                        continue;
+                    }
+                } else if page == "categories" {
+                    if !a.desktop || a.category != category {
+                        continue;
+                    }
+                } else {
+                    if !u.packages.is_active() && !a.desktop && selected_source().as_deref() != Some("aur") {
+                        continue;
+                    }
+                    if !format!("{} {} {}", a.name, a.package, a.summary).to_lowercase().contains(&query) {
+                        continue;
+                    }
+                }
+                // Prefer the installed source in the Installed page, and repository order elsewhere.
+                if page == "installed"
+                    && c.sources.get(&a.package).is_some_and(|(s, _)| s != &a.source)
+                    && c.apps.iter().any(|other| {
+                        other.package == a.package && c.sources.get(&a.package).is_some_and(|(s, _)| s == &other.source)
+                    })
+                {
+                    continue;
+                }
+                if seen.insert(a.package.clone()) {
+                    apps.push(a.clone());
+                }
+                if apps.len() == 200 {
+                    break;
+                }
+            }
+            if apps.is_empty() {
+                text("No apps match. Try another search, select AUR, or enable “Include packages.”");
+            } else {
+                grid(&apps);
+            }
+            if apps.len() == 200 {
+                text("Showing the first 200 results. Narrow your search to find more.");
+            }
+        }
+    }
+    if !u.busy.get() {
+        u.status.set_text(&format!(
+            "{} apps · {} installed · Omarchy first",
+            c.apps.iter().filter(|a| a.desktop).map(|a| &a.package).collect::<BTreeSet<_>>().len(),
+            c.apps.iter().filter(|a| a.desktop && a.installed.is_some()).map(|a| &a.package).collect::<BTreeSet<_>>().len()
+        ));
+    }
+}
+
+fn grid(apps: &[App]) {
+    let grid = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .min_children_per_line(1)
+        .max_children_per_line(3)
+        .column_spacing(12)
+        .row_spacing(12)
+        .homogeneous(true)
+        .build();
+    grid.add_css_class("store-grid");
+    for app in apps.iter().take(200) {
+        let tile = gtk::Button::new();
+        tile.add_css_class("app-tile");
+        tile.set_tooltip_text(Some(&format!("{} · {}", app.name, app.source)));
+        let row = widgets::hbox(12);
+        let icon = app_icon(app);
+        icon.set_pixel_size(40);
+        icon.set_valign(gtk::Align::Start);
+        row.append(&icon);
+        let column = widgets::vbox(6);
+        column.set_hexpand(true);
+        let name = widgets::label(&app.name, "app-name");
+        name.set_xalign(0.0);
+        name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        name.set_max_width_chars(24);
+        column.append(&name);
+        let summary = widgets::label(&app.summary, "app-summary");
+        summary.set_xalign(0.0);
+        summary.set_wrap(true);
+        summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        summary.set_lines(2);
+        summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        summary.set_max_width_chars(26);
+        column.append(&summary);
+        let tag =
+            widgets::label(&format!("{}{}", app.source, if app.installed.is_some() { " · Installed" } else { "" }), "source-tag");
+        tag.set_xalign(0.0);
+        column.append(&tag);
+        row.append(&column);
+        tile.set_child(Some(&row));
+        let app = app.clone();
+        tile.connect_clicked(move |_| details(app.clone()));
+        grid.insert(&tile, -1);
+    }
+    ui().body.append(&grid);
+}
+
+fn details(app: App) {
+    let (dialog, card) = widgets::dialog(&app.name, 680);
+    dialog.set_default_height(620);
+    let content = widgets::vbox(14);
+    let head = widgets::hbox(14);
+    let icon = app_icon(&app);
+    icon.set_pixel_size(64);
+    head.append(&icon);
+    let info = widgets::vbox(6);
+    let summary = widgets::label(&app.summary, "app-summary");
+    summary.set_wrap(true);
+    summary.set_xalign(0.0);
+    info.append(&summary);
+    info.append(&widgets::label(&format!("{} · {}", app.source, app.version), "source-tag"));
+    head.append(&info);
+    content.append(&head);
+    let description = widgets::label(if app.description.is_empty() { &app.summary } else { &app.description }, "");
+    description.set_wrap(true);
+    description.set_xalign(0.0);
+    description.set_selectable(true);
+    content.append(&description);
+    if app.source == "aur" {
+        content.append(&widgets::banner(
+            "AUR packages are community build recipes. Review the files before building. Builds run as your user.",
+            true,
+        ));
+    }
+    if !app.license.is_empty() {
+        content.append(&widgets::row("License", &app.license, None));
+    }
+    content.append(&widgets::row("Package", &app.package, None));
+    if let Some(version) = &app.installed {
+        content.append(&widgets::row("Installed version", version, None));
+    }
+    if !app.website.is_empty() && app.website.starts_with("https://") {
+        let link = gtk::LinkButton::with_label(&app.website, "Website");
+        link.set_halign(gtk::Align::Start);
+        content.append(&link);
+    }
+    for index in 0..app.screenshots.len().min(3) {
+        let picture = gtk::Picture::new();
+        picture.set_can_shrink(true);
+        picture.set_content_fit(gtk::ContentFit::Contain);
+        picture.set_height_request(220);
+        content.append(&picture);
+        load_picture(&app, index, &picture);
+    }
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&content)
+        .vexpand(true)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_height(280)
+        .max_content_height(540)
+        .propagate_natural_height(true)
+        .build();
+    card.append(&scroll);
+    let actions = widgets::hbox(8);
+    actions.set_halign(gtk::Align::End);
+    let d = dialog.clone();
+    actions.append(&button("Close", move || d.close()));
+    if app.installed.is_some() {
+        if !app.desktop_id.is_empty() {
+            let desktop = app.desktop_id.clone();
+            let launch = button("Open", move || {
+                if let Some(app) = gio::AppInfo::all().into_iter().find(|a| a.id().is_some_and(|id| id == desktop)) {
+                    if let Err(e) = app.launch(&[], None::<&gio::AppLaunchContext>) {
+                        notice(&e.to_string());
+                    }
+                } else {
+                    notice("The app’s desktop launcher is unavailable.");
+                }
+            });
+            actions.append(&launch);
+        }
+        if !nixe_store::model::protected(&app.package) {
+            let package = app.package.clone();
+            let d = dialog.clone();
+            let armed = Rc::new(Cell::new(false));
+            let remove = gtk::Button::with_label("Remove");
+            remove.add_css_class("destructive-action");
+            remove.connect_clicked(move |b| {
+                if armed.replace(true) {
+                    d.close();
+                    start_request(Request::Remove { package: package.clone() });
+                } else {
+                    b.set_label("Click again to remove");
+                    let a = armed.clone();
+                    let b = b.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_secs(4), move || {
+                        a.set(false);
+                        b.set_label("Remove");
+                    });
+                }
+            });
+            actions.append(&remove);
+        }
+    } else {
+        let d = dialog.clone();
+        let a = app.clone();
+        let install = button(if app.source == "aur" { "Review build" } else { "Install" }, move || {
+            d.close();
+            if a.source == "aur" {
+                review_aur(&a.package);
+            } else {
+                start_request(Request::Install { source: a.source.clone(), packages: vec![a.package.clone()] });
+            }
+        });
+        install.add_css_class("suggested-action");
+        install.set_sensitive(!ui().busy.get());
+        actions.append(&install);
+    }
+    card.append(&actions);
+    dialog.present();
+}
+
+fn render_updates(c: &Catalog) {
+    heading(
+        "Repository updates",
+        "Arch updates are coordinated across the system. Store verifies every package’s original source before installation.",
+    );
+    let unknown = c.installed.values().filter(|p| !c.sources.get(&p.name).is_some_and(|(_, s)| s == &p.stamp)).count();
+    if unknown > 0 {
+        let row = widgets::button_row(
+            "Review existing sources",
+            &format!(
+                "{unknown} installed packages have no confirmed origin. Packages requiring an update will be blocked until reviewed."
+            ),
+            "Review",
+            |_| source_review(),
+        );
+        ui().body.append(&row.0);
+    }
+    let update = button("Review system update", || start_request(Request::Update));
+    update.add_css_class("suggested-action");
+    update.set_halign(gtk::Align::Start);
+    update.set_sensitive(!ui().busy.get());
+    ui().body.append(&update);
+    if c.updates.is_empty() {
+        text("No repository updates in the cached catalog. Refresh to check the latest versions.");
+    } else {
+        for change in &c.updates {
+            let row = widgets::row(
+                &change.name,
+                &format!("{} → {} · {}", change.old.as_deref().unwrap_or(""), change.new.as_deref().unwrap_or(""), change.source),
+                None,
+            );
+            ui().body.append(&row);
+        }
+    }
+    heading("AUR updates", "Rebuild community packages from reviewed recipes. Repository dependencies are updated first.");
+    let b = button("Check AUR updates", check_aur_updates);
+    b.set_halign(gtk::Align::Start);
+    ui().body.append(&b);
+    let u = ui();
+    if u.aur_updates.borrow().is_empty() {
+        text("Check for updates to packages whose recorded source is AUR.");
+    }
+    for a in u.aur_updates.borrow().iter() {
+        let name = a.package.clone();
+        let row = widgets::button_row(
+            &a.name,
+            &format!("{} → {}", a.installed.as_deref().unwrap_or(""), a.version),
+            "Review build",
+            move |_| review_aur(&name),
+        );
+        u.body.append(&row.0);
+    }
+}
+
+fn check_aur_updates() {
+    let u = ui();
+    if u.busy.get() {
+        return;
+    }
+    let names: Vec<String> = u
+        .catalog
+        .borrow()
+        .as_ref()
+        .map(|c| {
+            c.installed
+                .values()
+                .filter(|p| c.sources.get(&p.name).is_some_and(|(s, stamp)| s == "aur" && stamp == &p.stamp))
+                .map(|p| p.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    if names.is_empty() {
+        toast("No packages have a confirmed AUR source.");
+        return;
+    }
+    let (tx, rx) = async_channel::bounded(1);
+    u.status.set_text("Checking AUR updates…");
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(aur::info(&names).map_err(|e| e.to_string()));
+    });
+    glib::spawn_future_local(async move {
+        if let Ok(result) = rx.recv().await {
+            match result {
+                Ok(mut apps) => {
+                    let u = ui();
+                    if let Some(c) = u.catalog.borrow().as_ref() {
+                        apps.retain_mut(|a| {
+                            a.installed = c.installed.get(&a.package).map(|p| p.version.clone());
+                            a.installed.as_ref().is_some_and(|old| alpm::vercmp(a.version.as_str(), old.as_str()).is_gt())
+                        });
+                    }
+                    let count = apps.len();
+                    *u.aur_updates.borrow_mut() = apps;
+                    render();
+                    toast(&format!("{count} AUR updates available"));
+                }
+                Err(e) => notice(&e),
+            }
+        }
+    });
+}
+
+fn render_repositories(c: &Catalog) {
+    heading("Included sources", "Omarchy always has first priority. Updates keep each app’s original source.");
+    let included = widgets::vbox(0);
+    included.add_css_class("group-list");
+    for (title, description, status) in [
+        ("Omarchy", "The preferred source for Omarchy apps and packages.", "First priority"),
+        ("Arch Linux", "Core, extra and multilib repositories.", "Enabled"),
+        ("AUR", "Community recipes, reviewed and built as your user.", "Available"),
+    ] {
+        let state = widgets::label(status, "source-tag");
+        included.append(&widgets::row(title, description, Some(state.upcast_ref())));
+    }
+    ui().body.append(&included);
+    heading("Additional sources", "Add more apps without changing your system’s repository order.");
+    let additional = widgets::vbox(0);
+    additional.add_css_class("group-list");
+    let blackarch = c.repositories.iter().find(|r| r.name == "blackarch").cloned().unwrap_or_else(repositories::blackarch);
+    let enabled = blackarch.enabled;
+    let (row, action) = widgets::button_row(
+        "BlackArch",
+        if enabled { "Security and research tools · enabled" } else { "Security and research tools · sets up automatically" },
+        if enabled { "Disable" } else { "Setup" },
+        move |_| {
+            if enabled {
+                let mut repo = blackarch.clone();
+                repo.enabled = false;
+                start_request(Request::Repository { repository: repo });
+            } else {
+                start_request(Request::BlackarchSetup);
+            }
+        },
+    );
+    action.set_sensitive(!ui().busy.get());
+    additional.append(&row);
+    let system = repositories::system_config().ok();
+    for repo in c.repositories.iter().filter(|r| !repositories::official(&r.name) && r.name != "blackarch") {
+        if system.as_ref().is_some_and(|c| c.repos.iter().any(|r| r.name == repo.name)) {
+            additional.append(&widgets::row(&repo.name, "Managed by your system configuration.", None));
+        } else {
+            let repo = repo.clone();
+            let name = repo.name.clone();
+            let row = widgets::button_row(&name, if repo.enabled { "Enabled" } else { "Disabled" }, "Manage", move |_| {
+                repository_dialog(Some(repo.clone()))
+            });
+            additional.append(&row.0);
+        }
+    }
+    ui().body.append(&additional);
+    let add = button("Add repository", || repository_dialog(None));
+    add.set_halign(gtk::Align::Start);
+    add.set_margin_top(12);
+    ui().body.append(&add);
+    heading("Update protection", "Confirm the original sources of apps installed before Store.");
+    let unknown = c.installed.values().filter(|p| !c.sources.get(&p.name).is_some_and(|(_, stamp)| stamp == &p.stamp)).count();
+    let sources = widgets::vbox(0);
+    sources.add_css_class("group-list");
+    let row = widgets::button_row(
+        "Existing installations",
+        &format!("{unknown} packages need their original source confirmed."),
+        "Review",
+        |_| source_review(),
+    );
+    sources.append(&row.0);
+    ui().body.append(&sources);
+}
+
+fn repository_dialog(repo: Option<repositories::Repository>) {
+    let (dialog, card) = widgets::dialog(if repo.is_some() { "Manage repository" } else { "Add repository" }, 560);
+    let repo = repo.unwrap_or(repositories::Repository { name: String::new(), servers: vec![String::new()], enabled: true });
+    let name = gtk::Entry::new();
+    name.set_placeholder_text(Some("Repository name"));
+    name.set_text(&repo.name);
+    name.set_editable(repo.name.is_empty());
+    card.append(&name);
+    let server = gtk::Entry::new();
+    server.set_placeholder_text(Some("https://mirror.example/$repo/os/$arch"));
+    server.set_text(repo.servers.first().map(String::as_str).unwrap_or(""));
+    card.append(&server);
+    let enabled = gtk::CheckButton::with_label("Enable this source");
+    enabled.set_active(repo.enabled);
+    card.append(&enabled);
+    let label = widgets::label(
+        "Signed packages are required. Trust the source’s full signing-key fingerprint separately. Disabling a source blocks updates for its installed packages.",
+        "dim",
+    );
+    label.set_wrap(true);
+    card.append(&label);
+    let trust = button("Add signing key…", key_dialog);
+    trust.set_halign(gtk::Align::Start);
+    card.append(&trust);
+    let actions = widgets::hbox(8);
+    actions.set_halign(gtk::Align::End);
+    let d = dialog.clone();
+    actions.append(&button("Not now", move || d.close()));
+    let d = dialog.clone();
+    let all_servers = repo.servers.clone();
+    actions.append(&button("Save", move || {
+        let mut servers = all_servers.clone();
+        if servers.is_empty() {
+            servers.push(server.text().to_string());
+        } else {
+            servers[0] = server.text().to_string();
+        }
+        let repository = repositories::Repository { name: name.text().trim().to_string(), servers, enabled: enabled.is_active() };
+        if let Err(e) = repositories::validate(&repository) {
+            notice(&e.to_string());
+            return;
+        }
+        d.close();
+        start_request(Request::Repository { repository });
+    }));
+    card.append(&actions);
+    dialog.present();
+}
+fn key_dialog() {
+    widgets::ask_text(
+        "Trust repository signing key",
+        "Enter the complete 40-character fingerprint from the repository’s official website. Trusting this key allows its packages to run code as root when installed.",
+        "",
+        "Trust key",
+        |fingerprint| start_request(Request::TrustKey { fingerprint: fingerprint.replace(' ', "").to_uppercase() }),
+    );
+}
+
+fn source_review() {
+    let u = ui();
+    if u.busy.get() {
+        return;
+    }
+    let c = u.catalog.borrow();
+    let Some(c) = c.as_ref() else {
+        return;
+    };
+    let mut groups: BTreeMap<Vec<String>, Vec<(String, String)>> = BTreeMap::new();
+    for p in c.installed.values() {
+        if c.sources.get(&p.name).is_some_and(|(_, s)| s == &p.stamp) {
+            continue;
+        }
+        groups.entry(c.candidates.get(&p.name).cloned().unwrap_or_default()).or_default().push((p.name.clone(), p.stamp.clone()));
+    }
+    if groups.is_empty() {
+        toast("Every installed package has a confirmed source.");
+        return;
+    }
+    let (dialog, card) = widgets::dialog("Review existing sources", 720);
+    dialog.set_default_height(680);
+    let note = widgets::label(
+        "Pacman does not retain a reliable original repository. These are suggestions, not proven history. Confirm only the groups whose source you recognize; unresolved packages stay protected from updates.",
+        "dim",
+    );
+    note.set_wrap(true);
+    card.append(&note);
+    let content = widgets::vbox(16);
+    let mut selections = Vec::new();
+    for (candidates, packages) in groups {
+        let group = widgets::vbox(8);
+        let default = if candidates.len() == 1 { candidates[0].as_str() } else { "Choose source" };
+        let check = gtk::CheckButton::with_label(&format!("Confirm {} packages · {default}", packages.len()));
+        check.set_active(candidates.len() == 1);
+        group.append(&check);
+        let options: Vec<String> = if candidates.is_empty() {
+            vec!["Leave unresolved".into(), "aur".into(), "local".into()]
+        } else {
+            let mut options = candidates.clone();
+            options.extend(["aur".into(), "local".into()]);
+            options
+        };
+        let refs: Vec<_> = options.iter().map(String::as_str).collect();
+        let dd = gtk::DropDown::from_strings(&refs);
+        group.append(&dd);
+        let view = gtk::TextView::new();
+        view.set_editable(false);
+        view.set_cursor_visible(false);
+        view.set_wrap_mode(gtk::WrapMode::WordChar);
+        view.add_css_class("recipe");
+        view.buffer().set_text(&packages.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "));
+        let list = gtk::ScrolledWindow::builder()
+            .child(&view)
+            .min_content_height(70)
+            .max_content_height(130)
+            .propagate_natural_height(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .build();
+        group.append(&list);
+        content.append(&group);
+        selections.push((check, dd, options, packages));
+    }
+    let scroll = gtk::ScrolledWindow::builder().child(&content).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+    card.append(&scroll);
+    let actions = widgets::hbox(8);
+    actions.set_halign(gtk::Align::End);
+    let d = dialog.clone();
+    actions.append(&button("Not now", move || d.close()));
+    let d = dialog.clone();
+    actions.append(&button("Confirm selected sources", move || {
+        let mut assignments = Vec::new();
+        for (check, dd, options, packages) in &selections {
+            if check.is_active() {
+                if let Some(source) = options.get(dd.selected() as usize).filter(|s| s.as_str() != "Leave unresolved") {
+                    for (name, stamp) in packages {
+                        assignments.push((name.clone(), source.clone(), stamp.clone()));
+                    }
+                }
+            }
+        }
+        if assignments.is_empty() {
+            toast("Select at least one source group to confirm.");
+            return;
+        }
+        d.close();
+        start_request(Request::Sources { assignments });
+    }));
+    card.append(&actions);
+    dialog.present();
+}
+
+fn start_request(request: Request) {
+    let u = ui();
+    if u.busy.get() {
+        toast("A package operation is already running.");
+        return;
+    }
+    let setup = matches!(request, Request::BlackarchSetup);
+    if setup {
+        blackarch_dialog::open();
+    }
+    let refresh_after = setup || matches!(request, Request::Repository { .. });
+    busy(true);
+    u.committed.set(setup);
+    u.cancel_button.set_visible(!setup);
+    *u.cancelled.borrow_mut() = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    notice("");
+    u.status.set_text("Authorizing package operation…");
+    let (send, receive) = async_channel::unbounded();
+    let (confirm, confirmed) = mpsc::channel();
+    *u.confirmation.borrow_mut() = Some(confirm);
+    std::thread::spawn(move || transaction::start(request, send, confirmed));
+    glib::spawn_future_local(async move {
+        let mut done = false;
+        while let Ok(event) = receive.recv().await {
+            match event {
+                Event::Status { message } => {
+                    if setup {
+                        blackarch_dialog::update(&message);
+                    }
+                    ui().status.set_text(message.trim());
+                    ui().progress.pulse();
+                }
+                Event::Plan { plan } => {
+                    if ui().cancelled.borrow().load(std::sync::atomic::Ordering::Relaxed) {
+                        if let Some(tx) = ui().confirmation.borrow().as_ref() {
+                            let _ = tx.send(None);
+                        }
+                    } else {
+                        transaction_review(plan);
+                    }
+                }
+                Event::Done { message } => {
+                    done = true;
+                    if setup {
+                        blackarch_dialog::finish(&message, true);
+                    }
+                    operation_done(&message, refresh_after);
+                    break;
+                }
+                Event::Error { message } => {
+                    done = true;
+                    if setup {
+                        blackarch_dialog::finish(&message, false);
+                    }
+                    operation_error(&message);
+                    break;
+                }
+            }
+        }
+        if !done {
+            if setup {
+                blackarch_dialog::finish("Setup was cancelled before it finished. You can retry.", false);
+            }
+            operation_error("Operation cancelled before installation.");
+        }
+    });
+}
+fn operation_error(message: &str) {
+    let u = ui();
+    u.committed.set(false);
+    busy(false);
+    u.confirmation.borrow_mut().take();
+    u.queue.borrow_mut().clear();
+    u.pending_recipe.borrow_mut().take();
+    notice(message);
+    u.status.set_text("Operation stopped");
+}
+fn operation_done(message: &str, refresh_after: bool) {
+    let u = ui();
+    busy(false);
+    u.confirmation.borrow_mut().take();
+    u.committed.set(false);
+    toast(message);
+    let next = u.queue.borrow_mut().pop_front();
+    if let Some(next) = next {
+        start_request(next);
+        return;
+    }
+    let recipe = u.pending_recipe.borrow_mut().take();
+    if let Some(recipe) = recipe {
+        build_aur(recipe);
+    } else {
+        refresh(refresh_after);
+    }
+}
+fn transaction_review(plan: Plan) {
+    let (dialog, card) = widgets::dialog("Review package changes", 680);
+    dialog.set_default_height(600);
+    let bytes: i64 = plan.changes.iter().map(|c| c.bytes).sum();
+    let note = widgets::label(
+        &format!(
+            "{} package changes · {:.1} MiB package data\nEvery update keeps its recorded source. Required system updates are included.",
+            plan.changes.len(),
+            bytes as f64 / 1048576.0
+        ),
+        "dim",
+    );
+    note.set_wrap(true);
+    card.append(&note);
+    let list = widgets::vbox(0);
+    for c in &plan.changes {
+        list.append(&widgets::row(
+            &c.name,
+            &format!("{} → {} · {}", c.old.as_deref().unwrap_or("Not installed"), c.new.as_deref().unwrap_or("Remove"), c.source),
+            None,
+        ));
+    }
+    let scroll = gtk::ScrolledWindow::builder().child(&list).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+    card.append(&scroll);
+    let actions = widgets::hbox(8);
+    actions.set_halign(gtk::Align::End);
+    let d = dialog.clone();
+    actions.append(&button("Not now", move || d.close()));
+    let approved = Rc::new(Cell::new(false));
+    let a = approved.clone();
+    let d = dialog.clone();
+    let install = button("Apply changes", move || {
+        a.set(true);
+        ui().committed.set(true);
+        ui().cancel_button.set_visible(false);
+        if let Some(tx) = ui().confirmation.borrow().as_ref() {
+            let _ = tx.send(Some(plan.clone()));
+        }
+        d.close();
+    });
+    install.add_css_class("suggested-action");
+    actions.append(&install);
+    card.append(&actions);
+    dialog.connect_close_request(move |_| {
+        if !approved.get() {
+            if let Some(tx) = ui().confirmation.borrow().as_ref() {
+                let _ = tx.send(None);
+            }
+        }
+        glib::Propagation::Proceed
+    });
+    dialog.present();
+}
+
+fn review_aur(package: &str) {
+    if ui().busy.get() {
+        return;
+    }
+    busy(true);
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *ui().cancelled.borrow_mut() = cancel.clone();
+    ui().status.set_text("Downloading the AUR recipe…");
+    let package = package.to_string();
+    let cache = nixe_core::paths::cache_dir();
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let result = aur::recipe(&cache, &package)
+            .and_then(|r| {
+                let deps = aur::missing_dependencies(&r, &cache)?;
+                Ok((r, deps))
+            })
+            .map_err(|e| e.to_string());
+        let _ = tx.send_blocking(result);
+    });
+    glib::spawn_future_local(async move {
+        if let Ok(result) = rx.recv().await {
+            busy(false);
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                toast("AUR recipe download cancelled.");
+                return;
+            }
+            match result {
+                Err(e) => notice(&e),
+                Ok((recipe, dependencies)) => {
+                    let (dialog, card) = widgets::dialog("Review AUR build files", 800);
+                    dialog.set_default_height(700);
+                    let note = widgets::label(
+                        &format!(
+                            "{} · {}\n{} repository build dependencies will be reviewed before building.",
+                            recipe.base,
+                            &recipe.commit[..12],
+                            dependencies.len()
+                        ),
+                        "dim",
+                    );
+                    note.set_wrap(true);
+                    card.append(&note);
+                    let view = gtk::TextView::new();
+                    view.set_editable(false);
+                    view.set_cursor_visible(false);
+                    view.set_wrap_mode(gtk::WrapMode::WordChar);
+                    view.add_css_class("recipe");
+                    view.buffer().set_text(&recipe.review);
+                    let scroll = gtk::ScrolledWindow::builder()
+                        .child(&view)
+                        .vexpand(true)
+                        .hscrollbar_policy(gtk::PolicyType::Never)
+                        .build();
+                    card.append(&scroll);
+                    let actions = widgets::hbox(8);
+                    actions.set_halign(gtk::Align::End);
+                    let d = dialog.clone();
+                    actions.append(&button("Not now", move || d.close()));
+                    let d = dialog.clone();
+                    actions.append(&button("Build reviewed recipe", move || {
+                        d.close();
+                        let u = ui();
+                        *u.pending_recipe.borrow_mut() = Some(recipe.clone());
+                        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                        for (source, name) in &dependencies {
+                            groups.entry(source.clone()).or_default().push(name.clone());
+                        }
+                        let requests: VecDeque<_> =
+                            groups.into_iter().map(|(source, packages)| Request::Install { source, packages }).collect();
+                        *u.queue.borrow_mut() = requests;
+                        let next = u.queue.borrow_mut().pop_front();
+                        if let Some(next) = next {
+                            start_request(next);
+                        } else {
+                            u.pending_recipe.borrow_mut().take();
+                            build_aur(recipe.clone());
+                        }
+                    }));
+                    card.append(&actions);
+                    dialog.present();
+                }
+            }
+        }
+    });
+}
+fn build_aur(recipe: Recipe) {
+    busy(true);
+    ui().committed.set(false);
+    ui().cancel_button.set_visible(true);
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *ui().cancelled.borrow_mut() = cancel.clone();
+    ui().status.set_text("Building AUR package as your user…");
+    let (tx, rx) = async_channel::unbounded();
+    let r = recipe.clone();
+    std::thread::spawn(move || {
+        let result = aur::build(&r, &cancel, |message| {
+            let _ = tx.send_blocking(Err(message));
+        })
+        .map_err(|e| e.to_string());
+        let _ = tx.send_blocking(Ok(result));
+    });
+    glib::spawn_future_local(async move {
+        while let Ok(event) = rx.recv().await {
+            match event {
+                Err(message) => ui().status.set_text(&message),
+                Ok(result) => {
+                    busy(false);
+                    match result {
+                        Ok(artifacts) => {
+                            start_request(Request::AurInstall { artifacts, base: recipe.base, commit: recipe.commit })
+                        }
+                        Err(e) => operation_error(&e),
+                    }
+                    break;
+                }
+            }
+        }
+    });
+}
+fn cancel_operation() {
+    let u = ui();
+    if u.committed.get() {
+        return;
+    }
+    u.cancelled.borrow().store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(tx) = u.confirmation.borrow().as_ref() {
+        let _ = tx.send(None);
+    }
+    u.cancel_button.set_visible(false);
+    u.status.set_text("Cancelling before installation…");
+}
+
+fn settings() {
+    let u = ui();
+    nixe_ui::settings_card::open(
+        &u.overlay,
+        &u.window,
+        nixe_ui::settings_card::Spec {
+            groups: &[
+                ("Store window", "applications-graphics-symbolic", "Theme, glow, motion"),
+                ("Keyboard", "input-keyboard-symbolic", "Shortcuts"),
+            ],
+            search_text: None,
+        },
+        || {
+            let page = widgets::page("settings");
+            let g = page.group("Store window");
+            let p = prefs::get();
+            g.add(&widgets::start_row());
+            let options = theme::all().into_iter().map(|t| (t.id, t.name)).collect();
+            let (r, dd) = widgets::choice_row("Theme", "Use a bundled or custom Nixe theme.", options, &p.theme, |id| {
+                prefs::update(|p| {
+                    p.theme = id;
+                    p.mode = theme::ThemeMode::Theme;
+                });
+                theme::apply();
+            });
+            dd.set_sensitive(p.mode == theme::ThemeMode::Theme || !theme::omarchy_available());
+            if theme::omarchy_available() {
+                let (row, _) = widgets::switch_row(
+                    "Follow Omarchy theme",
+                    "Match the desktop’s colors and update live.",
+                    p.mode == theme::ThemeMode::Omarchy,
+                    move |on| {
+                        prefs::update(|p| p.mode = if on { theme::ThemeMode::Omarchy } else { theme::ThemeMode::Theme });
+                        dd.set_sensitive(!on);
+                        theme::apply();
+                    },
+                );
+                g.add(&row);
+            }
+            g.add(&r);
+            let swatches = widgets::hbox(4);
+            let palette = theme::current_palette();
+            for color in [&palette.bg, &palette.surface, &palette.muted, &palette.text, &palette.accent, &palette.danger] {
+                let swatch = widgets::hbox(0);
+                swatch.add_css_class("swatch");
+                let provider = gtk::CssProvider::new();
+                provider.load_from_string(&format!("box {{ background: {color}; }}"));
+                #[allow(deprecated)]
+                swatch.style_context().add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
+                swatches.append(&swatch);
+            }
+            g.add(&widgets::row("Current colors", "", Some(swatches.upcast_ref())));
+            let (r, _) = widgets::switch_row("Glow", "Use the suite’s accent effect preference.", p.glow, |on| {
+                prefs::update(|p| p.glow = on);
+                theme::apply();
+            });
+            g.add(&r);
+            let (r, _) = widgets::switch_row("Reduce motion", "Turn off animated transitions.", p.reduce_motion, |on| {
+                prefs::update(|p| p.reduce_motion = on);
+                theme::apply();
+            });
+            g.add(&r);
+            let g = page.group("Keyboard");
+            for (keys, action) in SHORTCUTS {
+                g.add(&widgets::row(action, "", Some(widgets::key_caps(&keys.split('+').collect::<Vec<_>>()).upcast_ref())));
+            }
+            (page.root.upcast(), page.body)
+        },
+    );
+}
+fn shortcuts() {
+    let (dialog, card) = widgets::dialog("Keyboard shortcuts", 520);
+    let rows = widgets::vbox(0);
+    rows.add_css_class("group-list");
+    for (keys, action) in SHORTCUTS {
+        rows.append(&widgets::row(action, "", Some(widgets::key_caps(&keys.split('+').collect::<Vec<_>>()).upcast_ref())));
+    }
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&rows)
+        .max_content_height(560)
+        .propagate_natural_height(true)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::External)
+        .build();
+    card.append(&scroll);
+    let d = dialog.clone();
+    let b = button("Close", move || d.close());
+    b.set_halign(gtk::Align::End);
+    card.append(&b);
+    dialog.present();
+}
+
+fn snapshot(out: std::path::PathBuf) {
+    let u = ui();
+    u.window.set_default_size(std::env::var("STORE_SNAPSHOT_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1120), 800);
+    let ready = Cell::new(false);
+    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+        if u.loading.get() || !ready.replace(true) {
+            return glib::ControlFlow::Continue;
+        }
+        let child = u.window.child().unwrap();
+        let paintable = gtk::WidgetPaintable::new(Some(&child));
+        let shot = gtk::Snapshot::new();
+        paintable.snapshot(&shot, child.width() as f64, child.height() as f64);
+        println!(
+            "Preview allocation: {} × {}; sidebar {} px (compact: {})",
+            child.width(),
+            child.height(),
+            u.nav.width(),
+            u.nav.has_css_class("compact")
+        );
+        if let (Some(node), Some(renderer)) = (shot.to_node(), u.window.renderer()) {
+            let texture = renderer.render_texture(&node, None);
+            match texture.save_to_png(&out) {
+                Ok(_) => println!("Saved {} × {} preview to {}", child.width(), child.height(), out.display()),
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+        u.window.application().unwrap().quit();
+        glib::ControlFlow::Break
+    });
+}
+
+fn app_icon(app: &App) -> gtk::Image {
+    let icon =
+        if app.icon.is_empty() || app.icon.starts_with("@cache:") { "application-x-executable-symbolic" } else { &app.icon };
+    let display = gdk::Display::default().unwrap();
+    let fallback = if gtk::IconTheme::for_display(&display).has_icon(icon) {
+        icon
+    } else {
+        catalog::CATEGORIES
+            .iter()
+            .find(|(category, _)| *category == app.category)
+            .map(|(_, icon)| *icon)
+            .unwrap_or("application-x-executable-symbolic")
+    };
+    let image = gtk::Image::from_icon_name(fallback);
+    if app.icon.starts_with("@cache:") {
+        let cache = nixe_core::paths::cache_dir();
+        let icon = app.icon.clone();
+        let (tx, rx) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(nixe_store::assets::icon(&cache, &icon));
+        });
+        let weak = image.downgrade();
+        glib::spawn_future_local(async move {
+            if let Ok(Ok(path)) = rx.recv().await {
+                if let Some(image) = weak.upgrade() {
+                    let paintable = gtk::IconPaintable::for_file(
+                        &gio::File::for_path(path),
+                        image.pixel_size().max(16),
+                        image.scale_factor(),
+                    );
+                    image.set_paintable(Some(&paintable));
+                }
+            }
+        });
+    }
+    image
+}
+
+fn load_picture(app: &App, index: usize, picture: &gtk::Picture) {
+    let app = app.clone();
+    let cache = nixe_core::paths::cache_dir();
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(nixe_store::assets::screenshot(&cache, &app, index));
+    });
+    let weak = picture.downgrade();
+    glib::spawn_future_local(async move {
+        if let Ok(result) = rx.recv().await {
+            if let Some(picture) = weak.upgrade() {
+                match result {
+                    Ok(path) => match gdk::Texture::from_filename(path) {
+                        Ok(texture) => {
+                            picture.set_paintable(Some(&texture));
+                            picture.set_visible(true);
+                        }
+                        Err(_) => picture.set_visible(false),
+                    },
+                    Err(error) => {
+                        picture.set_tooltip_text(Some(&error.to_string()));
+                        picture.set_visible(false);
+                    }
+                }
+            }
+        }
+    });
+}

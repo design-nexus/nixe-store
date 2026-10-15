@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Nixe</vendor>
+  <vendor_url>https://github.com/design-nexus/nixe</vendor_url>
+  <action id="io.github.design_nexus.nixe.store.manage">
+    <description>Manage software with Nixe Store</description>
+    <message>Authentication is required to install software or manage Store repositories</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/lib/nixe-store/nixe-store-helper</annotate>
+  </action>
+</policyconfig>

@@ -1,0 +1,47 @@
+.store-window .store-grid { padding: 2px 0; }
+.store-window .app-tile { padding: 16px; min-height: 100px; border: 1px solid @hairline; border-radius: 10px; background: transparent; }
+.store-window .app-tile:hover { background: @row_hover; }
+.store-window .app-name { font-weight: 700; }
+.store-window .app-summary { font-size: 0.88em; color: @theme_dim_text; }
+.store-window .source-tag { font-size: 0.76em; color: @theme_dim_text; }
+.store-window .collection-note { color: @theme_dim_text; font-size: 0.88em; margin-bottom: 14px; }
+.store-window .store-notice { padding: 10px 16px; border-bottom: 1px solid @hairline; color: @theme_danger; }
+.store-window .recipe { font-size: 0.88em; padding: 12px; background: alpha(@theme_shadow, 0.35); }
+.store-window .store-progress { min-height: 2px; }
+.store-window .empty-state { padding: 48px 24px; color: @theme_dim_text; }
+.store-window .detail-icon { margin-right: 14px; }
+.store-window .store-toast { background: @theme_surface; border: 1px solid @hairline; border-radius: 10px; padding: 12px 18px; margin: 16px; }
+
+.store-window .store-frame { background: @theme_bg; }
+
+/* Home uses the app-store editorial layout within Nixe's shared chrome. */
+.store-window .feature-hero {
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid alpha(@theme_accent, 0.4);
+  background: linear-gradient(125deg, mix(@theme_bg, @theme_accent, 0.30), mix(@theme_bg, @theme_highlight, 0.48));
+}
+.store-window .feature-hero:hover { border-color: @theme_accent; }
+.store-window .feature-content { padding: 28px; min-height: 230px; }
+.store-window .feature-shade {
+  background: linear-gradient(90deg, alpha(@theme_bg, 0.96), alpha(@theme_bg, 0.72) 52%, alpha(@theme_bg, 0.15));
+}
+.store-window .feature-eyebrow { color: @theme_accent; font-size: 0.76em; font-weight: 700; letter-spacing: 1.5px; }
+.store-window .feature-title { font-size: 2.2em; font-weight: 700; color: @theme_text; }
+.store-window .feature-description { font-size: 0.96em; color: @theme_text; font-weight: 400; }
+.store-window .feature-action { padding: 8px 12px; margin-top: 6px; border-radius: 6px; background: @nav_active; color: @theme_accent; font-weight: 600; }
+.store-window .feature-app-icon { margin: 16px; }
+.store-window .feature-controls { padding: 8px 2px 14px; }
+.store-window .home-collections { margin: 0 0 6px; }
+.store-window .collection-tile { padding: 16px 12px; border: 1px solid @hairline; border-radius: 10px; }
+.store-window .collection-tile image { color: @theme_accent; }
+.store-window .collection-create { background: linear-gradient(135deg, alpha(@theme_accent, 0.23), alpha(@theme_highlight, 0.25)); }
+.store-window .collection-work { background: linear-gradient(45deg, alpha(@theme_muted, 0.36), alpha(@theme_accent, 0.10)); }
+.store-window .collection-play { background: linear-gradient(135deg, alpha(@theme_highlight, 0.48), alpha(@theme_accent, 0.28)); }
+.store-window .collection-develop { background: linear-gradient(45deg, alpha(@theme_accent, 0.12), alpha(@theme_muted, 0.38)); }
+.store-window .collection-tile:hover { border-color: @theme_accent; }
+.store-window .home-collection-heading { margin-top: 26px; margin-bottom: 10px; }
+.store-window .home-section-title { color: @theme_text; font-size: 1.14em; font-weight: 600; }
+.store-window .settings-page.narrow .feature-content { padding: 20px; }
+.store-window .settings-page.narrow .feature-app-icon { margin: 4px; }
+.store-window .settings-page.narrow .feature-title { font-size: 1.8em; }
