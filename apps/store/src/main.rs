@@ -46,6 +46,37 @@ fn main() -> glib::ExitCode {
             }
         };
     }
+    // Nixe Assistant's search: the matching apps as JSON, read from the local package
+    // databases (no window, no network, nothing installed).
+    if let Some(i) = std::env::args().position(|a| a == "--find") {
+        let query: String = std::env::args().skip(i + 1).collect::<Vec<_>>().join(" ").to_lowercase();
+        return match nixe_store::catalog::load(&nixe_core::paths::cache_dir(), false) {
+            Ok(c) => {
+                let words: Vec<&str> = query.split_whitespace().collect();
+                let mut found: Vec<&nixe_store::model::App> = c
+                    .apps
+                    .iter()
+                    .filter(|a| {
+                        let hay = format!("{} {} {} {}", a.name, a.package, a.summary, a.category).to_lowercase();
+                        words.iter().all(|w| hay.contains(w))
+                    })
+                    .collect();
+                // Apps with a window first, then popular ones, then by name.
+                found.sort_by_key(|a| (!a.desktop, !a.popular, a.name.to_lowercase()));
+                let apps: Vec<serde_json::Value> = found
+                    .iter()
+                    .take(15)
+                    .map(|a| serde_json::json!({"package": a.package, "name": a.name, "summary": a.summary, "version": a.version, "installed": a.installed, "source": a.source, "category": a.category}))
+                    .collect();
+                println!("{}", serde_json::json!({"apps": apps, "matches": found.len()}));
+                glib::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                glib::ExitCode::FAILURE
+            }
+        };
+    }
     if std::env::args().any(|a| a == "--catalog-check") {
         return match nixe_store::catalog::load(&nixe_core::paths::cache_dir(), std::env::args().any(|a| a == "--refresh")) {
             Ok(c) => {
