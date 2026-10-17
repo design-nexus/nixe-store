@@ -103,14 +103,13 @@ pub fn recipe(cache: &Path, package: &str) -> Result<Recipe> {
     let srcinfo = fs::read_to_string(directory.join(".SRCINFO"))?;
     let mut dependencies = Vec::new();
     for line in srcinfo.lines() {
-        if let Some((key, value)) = line.trim().split_once(" = ") {
-            if matches!(
+        if let Some((key, value)) = line.trim().split_once(" = ")
+            && matches!(
                 key,
                 "depends" | "makedepends" | "checkdepends" | "depends_x86_64" | "makedepends_x86_64" | "checkdepends_x86_64"
             ) {
                 dependencies.push(value.to_string());
             }
-        }
     }
     dependencies.sort();
     dependencies.dedup();

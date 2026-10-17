@@ -141,16 +141,14 @@ pub fn screenshot(cache: &Path, app: &App, index: usize) -> Result<PathBuf> {
     // Remember a working alternative, avoiding repeated failed requests to blocked hosts.
     let resolved = directory.join(format!("{}-{index}.url", app.package));
     let mut urls = Vec::new();
-    if let Ok(url) = fs::read_to_string(&resolved) {
-        if url.starts_with("https://") {
+    if let Ok(url) = fs::read_to_string(&resolved)
+        && url.starts_with("https://") {
             urls.push(url);
         }
-    }
-    if let Some(url) = app.screenshots.get(index) {
-        if !urls.contains(url) {
+    if let Some(url) = app.screenshots.get(index)
+        && !urls.contains(url) {
             urls.push(url.clone());
         }
-    }
     let mut failures = Vec::new();
     for mirrored in [false, true] {
         if mirrored {

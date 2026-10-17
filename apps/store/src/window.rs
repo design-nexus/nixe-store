@@ -280,8 +280,8 @@ fn build(app: &gtk::Application) {
                     let _ = tx.send_blocking(aur::search(&query).map_err(|e| e.to_string()));
                 });
                 glib::spawn_future_local(async move {
-                    if let Ok(result) = rx.recv().await {
-                        if ui().search_generation.get() == generation {
+                    if let Ok(result) = rx.recv().await
+                        && ui().search_generation.get() == generation {
                             match result {
                                 Ok(mut apps) => {
                                     if let Some(c) = ui().catalog.borrow().as_ref() {
@@ -301,7 +301,6 @@ fn build(app: &gtk::Application) {
                                 Err(e) => notice(&e),
                             }
                         }
-                    }
                 });
             });
         }
@@ -385,11 +384,10 @@ fn responsive() {
     }
     chrome::set_head_compact(&u.head, compact);
     fn hide(widget: &gtk::Widget, compact: bool) {
-        if widget.has_css_class("nav-item") {
-            if let Some(content) = widget.downcast_ref::<gtk::Button>().and_then(|b| b.child()) {
+        if widget.has_css_class("nav-item")
+            && let Some(content) = widget.downcast_ref::<gtk::Button>().and_then(|b| b.child()) {
                 content.set_halign(if compact { gtk::Align::Center } else { gtk::Align::Fill });
             }
-        }
         let mut c = widget.first_child();
         while let Some(child) = c {
             if child.has_css_class("compact-hide") {
@@ -1117,13 +1115,12 @@ fn source_review() {
     actions.append(&button("Confirm selected sources", move || {
         let mut assignments = Vec::new();
         for (check, dd, options, packages) in &selections {
-            if check.is_active() {
-                if let Some(source) = options.get(dd.selected() as usize).filter(|s| s.as_str() != "Leave unresolved") {
+            if check.is_active()
+                && let Some(source) = options.get(dd.selected() as usize).filter(|s| s.as_str() != "Leave unresolved") {
                     for (name, stamp) in packages {
                         assignments.push((name.clone(), source.clone(), stamp.clone()));
                     }
                 }
-            }
         }
         if assignments.is_empty() {
             toast("Select at least one source group to confirm.");
@@ -1275,11 +1272,10 @@ fn transaction_review(plan: Plan) {
     actions.append(&install);
     card.append(&actions);
     dialog.connect_close_request(move |_| {
-        if !approved.get() {
-            if let Some(tx) = ui().confirmation.borrow().as_ref() {
+        if !approved.get()
+            && let Some(tx) = ui().confirmation.borrow().as_ref() {
                 let _ = tx.send(None);
             }
-        }
         glib::Propagation::Proceed
     });
     dialog.present();
@@ -1564,8 +1560,8 @@ fn app_icon(app: &App) -> gtk::Image {
         });
         let weak = image.downgrade();
         glib::spawn_future_local(async move {
-            if let Ok(Ok(path)) = rx.recv().await {
-                if let Some(image) = weak.upgrade() {
+            if let Ok(Ok(path)) = rx.recv().await
+                && let Some(image) = weak.upgrade() {
                     let paintable = gtk::IconPaintable::for_file(
                         &gio::File::for_path(path),
                         image.pixel_size().max(16),
@@ -1573,7 +1569,6 @@ fn app_icon(app: &App) -> gtk::Image {
                     );
                     image.set_paintable(Some(&paintable));
                 }
-            }
         });
     }
     image
@@ -1588,8 +1583,8 @@ fn load_picture(app: &App, index: usize, picture: &gtk::Picture) {
     });
     let weak = picture.downgrade();
     glib::spawn_future_local(async move {
-        if let Ok(result) = rx.recv().await {
-            if let Some(picture) = weak.upgrade() {
+        if let Ok(result) = rx.recv().await
+            && let Some(picture) = weak.upgrade() {
                 match result {
                     Ok(path) => match gdk::Texture::from_filename(path) {
                         Ok(texture) => {
@@ -1604,6 +1599,5 @@ fn load_picture(app: &App, index: usize, picture: &gtk::Picture) {
                     }
                 }
             }
-        }
     });
 }
