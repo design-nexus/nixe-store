@@ -1,0 +1,10 @@
+{
+  "application": "store",
+  "directory": "store",
+  "packages": [
+    "nixe-store"
+  ],
+  "manifest": "Cargo.toml",
+  "prepare": [],
+  "binaries": []
+}

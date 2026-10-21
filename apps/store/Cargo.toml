@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2024"
 description = "A native app store for Omarchy with source-preserving package management"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/design-nexus/nixe"
+repository = "https://github.com/design-nexus/nixe-store"
 
 [dependencies]
-nixe-core = { path = "../../crates/nixe-core" }
-nixe-ui = { path = "../../crates/nixe-ui" }
-nixe-theme = { path = "../../crates/nixe-theme" }
+nixe-core = { git = "file:///home/ken/Projects/nixe-migration-97c1899-reviewed/nixe-core", rev = "e4595e68a4fd9b44bd15e95311ace1d0fb669bc4" }
+nixe-ui = { git = "file:///home/ken/Projects/nixe-migration-97c1899-reviewed/nixe-design", rev = "6997fb93fe248e20a19277dbd3ef219cdba18683" }
+nixe-theme = { git = "file:///home/ken/Projects/nixe-migration-97c1899-reviewed/nixe-design", rev = "6997fb93fe248e20a19277dbd3ef219cdba18683" }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 alpm = "5.0.2"
 alpm-utils = "5.0.0"
