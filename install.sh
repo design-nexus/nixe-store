@@ -257,9 +257,11 @@ for a in "${apps[@]}"; do
 
   if [[ $a == store ]]; then
     say "Installing Store's root-owned package helper and authorization policy"
+    if ! cmp -s "${CARGO_TARGET_DIR:-$src/target}/release/nixe-store-helper" /usr/local/lib/nixe-store/nixe-store-helper || ! cmp -s "$d/data/io.github.design_nexus.nixe.store.policy" /usr/share/polkit-1/actions/io.github.design_nexus.nixe.store.policy; then
     sudo install -d -m 755 /usr/local/lib/nixe-store /var/lib/nixe-store
     sudo install -m 755 "${CARGO_TARGET_DIR:-$src/target}/release/nixe-store-helper" /usr/local/lib/nixe-store/nixe-store-helper
     sudo install -m 644 "$d/data/io.github.design_nexus.nixe.store.policy" /usr/share/polkit-1/actions/io.github.design_nexus.nixe.store.policy
+    fi
     # The privileged entry point is never executed from a user-writable directory.
     rm -f "$bin/nixe-store-helper"
   fi
