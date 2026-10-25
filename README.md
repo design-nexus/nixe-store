@@ -5,7 +5,7 @@ curated Arch favorites, search AUR, install and remove apps, and review coordina
 system updates. Uses the shared Nixe theme, settings card and keyboard conventions.
 
 ```sh
-./install.sh store
+curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe-store/main/install.sh | bash
 nixe-store
 ```
 
