@@ -4,13 +4,13 @@ mod blackarch_dialog;
 mod home;
 use crate::{prefs, theme, widgets};
 use gtk::{gdk, gio, glib, prelude::*};
-use nixe_store::{
+use nyx_store::{
     aur::{self, Recipe},
     catalog::{self, Catalog},
     model::{App, Event, Plan, Request},
     repositories, transaction,
 };
-use nixe_ui::chrome;
+use nyx_ui::chrome;
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -215,7 +215,7 @@ fn build(app: &gtk::Application) {
     overlay.add_overlay(&toast_label);
     window.set_child(Some(&overlay));
     let p = prefs::get();
-    let first = nixe_theme::start_page("home", &p.last_section);
+    let first = nyx_theme::start_page("home", &p.last_section);
     let u = Rc::new(Ui {
         window: window.clone(),
         overlay: overlay.clone(),
@@ -315,8 +315,8 @@ fn build(app: &gtk::Application) {
             gdk::Key::F1 => shortcuts(),
             gdk::Key::Left if mods.contains(gdk::ModifierType::ALT_MASK) => navigate("home"),
             gdk::Key::Escape => {
-                if nixe_ui::settings_card::is_open() {
-                    nixe_ui::settings_card::escape();
+                if nyx_ui::settings_card::is_open() {
+                    nyx_ui::settings_card::escape();
                 } else {
                     let u = ui();
                     u.search.set_text("");
@@ -329,9 +329,9 @@ fn build(app: &gtk::Application) {
         glib::Propagation::Stop
     });
     window.add_controller(keys);
-    nixe_ui::keys::install(
+    nyx_ui::keys::install(
         &window,
-        nixe_ui::keys::Common { settings: Some(settings), shortcuts: Some(shortcuts), close: true, ..Default::default() },
+        nyx_ui::keys::Common { settings: Some(settings), shortcuts: Some(shortcuts), close: true, ..Default::default() },
     );
     window.connect_close_request(|_| {
         if ui().busy.get() {
@@ -376,7 +376,7 @@ fn responsive() {
     let u = ui();
     let width = if u.window.width() > 0 { u.window.width() } else { u.window.default_width() };
     let compact = (width > 0 && width < 980) || prefs::get().sidebar_collapsed;
-    nixe_ui::settings_card::fit(&u.window);
+    nyx_ui::settings_card::fit(&u.window);
     if compact {
         u.nav.add_css_class("compact");
     } else {
@@ -451,7 +451,7 @@ fn refresh(network: bool) {
     u.spinner.start();
     u.status.set_text(if network { "Refreshing apps and repository metadata…" } else { "Loading apps…" });
     notice("");
-    let cache = nixe_core::paths::cache_dir();
+    let cache = nyx_core::paths::cache_dir();
     let bootstrap = !network && !cache.join("appstream.pkg.tar.zst").exists() && std::env::var_os("STORE_SNAPSHOT").is_none();
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
@@ -775,7 +775,7 @@ fn details(app: App) {
             });
             actions.append(&launch);
         }
-        if !nixe_store::model::protected(&app.package) {
+        if !nyx_store::model::protected(&app.package) {
             let package = app.package.clone();
             let d = dialog.clone();
             let armed = Rc::new(Cell::new(false));
@@ -1290,7 +1290,7 @@ fn review_aur(package: &str) {
     *ui().cancelled.borrow_mut() = cancel.clone();
     ui().status.set_text("Downloading the AUR recipe…");
     let package = package.to_string();
-    let cache = nixe_core::paths::cache_dir();
+    let cache = nyx_core::paths::cache_dir();
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let result = aur::recipe(&cache, &package)
@@ -1416,10 +1416,10 @@ fn cancel_operation() {
 
 fn settings() {
     let u = ui();
-    nixe_ui::settings_card::open(
+    nyx_ui::settings_card::open(
         &u.overlay,
         &u.window,
-        nixe_ui::settings_card::Spec {
+        nyx_ui::settings_card::Spec {
             groups: &[
                 ("Store window", "applications-graphics-symbolic", "Theme, glow, motion"),
                 ("Keyboard", "input-keyboard-symbolic", "Shortcuts"),
@@ -1432,7 +1432,7 @@ fn settings() {
             let p = prefs::get();
             g.add(&widgets::start_row());
             let options = theme::all().into_iter().map(|t| (t.id, t.name)).collect();
-            let (r, dd) = widgets::choice_row("Theme", "Use a bundled or custom Nixe theme.", options, &p.theme, |id| {
+            let (r, dd) = widgets::choice_row("Theme", "Use a bundled or custom Nyx theme.", options, &p.theme, |id| {
                 prefs::update(|p| {
                     p.theme = id;
                     p.mode = theme::ThemeMode::Theme;
@@ -1552,11 +1552,11 @@ fn app_icon(app: &App) -> gtk::Image {
     };
     let image = gtk::Image::from_icon_name(fallback);
     if app.icon.starts_with("@cache:") {
-        let cache = nixe_core::paths::cache_dir();
+        let cache = nyx_core::paths::cache_dir();
         let icon = app.icon.clone();
         let (tx, rx) = async_channel::bounded(1);
         std::thread::spawn(move || {
-            let _ = tx.send_blocking(nixe_store::assets::icon(&cache, &icon));
+            let _ = tx.send_blocking(nyx_store::assets::icon(&cache, &icon));
         });
         let weak = image.downgrade();
         glib::spawn_future_local(async move {
@@ -1576,10 +1576,10 @@ fn app_icon(app: &App) -> gtk::Image {
 
 fn load_picture(app: &App, index: usize, picture: &gtk::Picture) {
     let app = app.clone();
-    let cache = nixe_core::paths::cache_dir();
+    let cache = nyx_core::paths::cache_dir();
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
-        let _ = tx.send_blocking(nixe_store::assets::screenshot(&cache, &app, index));
+        let _ = tx.send_blocking(nyx_store::assets::screenshot(&cache, &app, index));
     });
     let weak = picture.downgrade();
     glib::spawn_future_local(async move {

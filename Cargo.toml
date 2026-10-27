@@ -6,7 +6,7 @@ members = ["apps/store"]
 edition = "2024"
 license = "MIT"
 authors = ["Ken Smith"]
-repository = "https://github.com/design-nexus/nixe-store"
+repository = "https://github.com/design-nexus/nyx-store"
 
 [profile.release]
 lto = "thin"

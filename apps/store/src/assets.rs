@@ -82,7 +82,7 @@ pub fn icon(cache: &Path, icon: &str) -> Result<PathBuf> {
 fn download(url: &str) -> Result<Vec<u8>> {
     ensure!(url.starts_with("https://"), "Artwork URL must use HTTPS");
     Ok(ureq::get(url)
-        .header("User-Agent", "Nixe-Store/0.1 (+https://github.com/design-nexus/nixe)")
+        .header("User-Agent", "Nyx-Store/0.1 (+https://github.com/design-nexus/nyx)")
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(12)))
         .build()

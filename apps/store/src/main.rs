@@ -5,14 +5,14 @@ mod window;
 use gtk::prelude::*;
 use gtk::{gio, glib};
 fn main() -> glib::ExitCode {
-    nixe_core::app::init(nixe_core::app::App { slug: "nixe-store", name: "Store" });
+    nyx_core::app::init(nyx_core::app::App { slug: "nyx-store", name: "Store" });
     if std::env::args().any(|a| a == "--help") {
-        println!("Usage: nixe-store [--section home|categories|installed|updates|repositories] [--search TEXT]");
+        println!("Usage: nyx-store [--section home|categories|installed|updates|repositories] [--search TEXT]");
         return glib::ExitCode::SUCCESS;
     }
     if std::env::args().any(|a| a == "--blackarch-check") {
-        return match nixe_store::blackarch::verify_bootstrap(
-            &nixe_core::paths::cache_dir().join("blackarch-verification"),
+        return match nyx_store::blackarch::verify_bootstrap(
+            &nyx_core::paths::cache_dir().join("blackarch-verification"),
             |message| println!("{message}"),
         ) {
             Ok(verified) => {
@@ -27,13 +27,13 @@ fn main() -> glib::ExitCode {
     }
     if std::env::args().any(|a| a == "--artwork-check") {
         let result = (|| -> anyhow::Result<()> {
-            let cache = nixe_core::paths::cache_dir();
-            let catalog = nixe_store::catalog::load(&cache, false)?;
+            let cache = nyx_core::paths::cache_dir();
+            let catalog = nyx_store::catalog::load(&cache, false)?;
             for name in ["blender", "krita", "obs-studio", "firefox"] {
                 let app =
                     catalog.apps.iter().find(|a| a.package == name).ok_or_else(|| anyhow::anyhow!("Missing app: {name}"))?;
-                let icon = nixe_store::assets::icon(&cache, &app.icon)?;
-                let screenshot = nixe_store::assets::screenshot(&cache, app, 0)?;
+                let icon = nyx_store::assets::icon(&cache, &app.icon)?;
+                let screenshot = nyx_store::assets::screenshot(&cache, app, 0)?;
                 println!("{name}: decoded icon {} and screenshot {}", icon.display(), screenshot.display());
             }
             Ok(())
@@ -46,14 +46,14 @@ fn main() -> glib::ExitCode {
             }
         };
     }
-    // Nixe Assistant's search: the matching apps as JSON, read from the local package
+    // Nyx Assistant's search: the matching apps as JSON, read from the local package
     // databases (no window, no network, nothing installed).
     if let Some(i) = std::env::args().position(|a| a == "--find") {
         let query: String = std::env::args().skip(i + 1).collect::<Vec<_>>().join(" ").to_lowercase();
-        return match nixe_store::catalog::load(&nixe_core::paths::cache_dir(), false) {
+        return match nyx_store::catalog::load(&nyx_core::paths::cache_dir(), false) {
             Ok(c) => {
                 let words: Vec<&str> = query.split_whitespace().collect();
-                let mut found: Vec<&nixe_store::model::App> = c
+                let mut found: Vec<&nyx_store::model::App> = c
                     .apps
                     .iter()
                     .filter(|a| {
@@ -78,7 +78,7 @@ fn main() -> glib::ExitCode {
         };
     }
     if std::env::args().any(|a| a == "--catalog-check") {
-        return match nixe_store::catalog::load(&nixe_core::paths::cache_dir(), std::env::args().any(|a| a == "--refresh")) {
+        return match nyx_store::catalog::load(&nyx_core::paths::cache_dir(), std::env::args().any(|a| a == "--refresh")) {
             Ok(c) => {
                 if !c.warning.is_empty() {
                     eprintln!("{}", c.warning);
@@ -102,7 +102,7 @@ fn main() -> glib::ExitCode {
         unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
     }
     let app = gtk::Application::builder()
-        .application_id("io.github.design_nexus.nixe.Store")
+        .application_id("io.github.design_nexus.nyx.Store")
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
     app.connect_command_line(|app, cli| {

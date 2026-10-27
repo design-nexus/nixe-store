@@ -2,7 +2,7 @@
   "application": "store",
   "directory": "store",
   "packages": [
-    "nixe-store"
+    "nyx-store"
   ],
   "manifest": "Cargo.toml",
   "prepare": [],
@@ -13,9 +13,9 @@
       "test",
       "--locked",
       "-p",
-      "nixe-store",
+      "nyx-store",
       "--bin",
-      "nixe-store"
+      "nyx-store"
     ]
   ]
 }

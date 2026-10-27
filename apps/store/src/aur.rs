@@ -150,7 +150,7 @@ pub fn build(recipe: &Recipe, cancel: &std::sync::atomic::AtomicBool, progress: 
         command(&recipe.directory, &["status", "--porcelain", "--untracked-files=no"])?.is_empty(),
         "The reviewed recipe has changed"
     );
-    let log_path = recipe.directory.join("nixe-build.log");
+    let log_path = recipe.directory.join("nyx-build.log");
     let log = fs::File::create(&log_path)?;
     let mut child = Command::new("/usr/bin/makepkg")
         .current_dir(&recipe.directory)

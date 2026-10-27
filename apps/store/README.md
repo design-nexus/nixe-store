@@ -1,12 +1,12 @@
 # Store
 
-A native software store for Omarchy, part of Nixe. Browse desktop apps, discover
+A native software store for Omarchy, part of Nyx. Browse desktop apps, discover
 curated Arch favorites, search AUR, install and remove apps, and review coordinated
-system updates. Uses the shared Nixe theme, settings card and keyboard conventions.
+system updates. Uses the shared Nyx theme, settings card and keyboard conventions.
 
 ```sh
 ./install.sh store
-nixe-store
+nyx-store
 ```
 
 The installer installs the UI to `~/.local` and asks through sudo to install the
@@ -29,7 +29,7 @@ external package changes invalidate stale records when the installed package sta
 changes. Identical external reinstalls within the same second cannot be distinguished
 by pacman's metadata. Other package tools do not enforce Store's policies.
 
-Added repositories are stored in `/var/lib/nixe-store/repositories.json`, separately
+Added repositories are stored in `/var/lib/nyx-store/repositories.json`, separately
 from `/etc/pacman.conf`. Signed packages and trusted keys are required. Repository
 names identify sources; changing mirrors retains that identity. Disable a repository
 to remove it from discovery; its installed packages retain their source records and
@@ -59,11 +59,11 @@ built as the current user with `makepkg`. Repository build dependencies are revi
 first. Missing AUR dependencies must be installed through their own recipe review
 before retrying the parent build. Split-package artifacts are reviewed together.
 AUR recipes execute user-controlled code and can access your user's files. Build logs
-are in `~/.cache/nixe-store/aur/<base>/nixe-build.log`. AUR updates are checked and
+are in `~/.cache/nyx-store/aur/<base>/nyx-build.log`. AUR updates are checked and
 reviewed separately from binary repository updates.
 
 Root-owned provenance and the durable pending transaction journal live in
-`/var/lib/nixe-store/provenance.sqlite`. Failed commits are reconciled against the
+`/var/lib/nyx-store/provenance.sqlite`. Failed commits are reconciled against the
 actual installed database. Store uses libalpm’s native global pacman lock. Never delete a package lock while another package manager is running.
 Cancellation is available before applying a reviewed transaction and during AUR
 builds; commits are allowed to finish. Trusting a signing key modifies pacman's system trust database explicitly.
@@ -90,9 +90,9 @@ packages** in search or as dependencies in transaction reviews.
 ## Development
 
 ```sh
-cargo build -p nixe-store
-cargo test -p nixe-store --lib
-cargo run -p nixe-store --bin nixe-store -- --catalog-check
+cargo build -p nyx-store
+cargo test -p nyx-store --lib
+cargo run -p nyx-store --bin nyx-store -- --catalog-check
 ```
 
 The catalog check only reads pacman's installed packages and writes Store's user

@@ -2,8 +2,8 @@ use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
-pub const STATE: &str = "/var/lib/nixe-store";
-pub const HELPER: &str = "/usr/local/lib/nixe-store/nixe-store-helper";
+pub const STATE: &str = "/var/lib/nyx-store";
+pub const HELPER: &str = "/usr/local/lib/nyx-store/nyx-store-helper";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

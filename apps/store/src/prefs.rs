@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
-    pub mode: nixe_theme::ThemeMode,
+    pub mode: nyx_theme::ThemeMode,
     pub theme: String,
     pub glow: bool,
     pub reduce_motion: bool,
@@ -12,7 +12,7 @@ pub struct Prefs {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            mode: nixe_theme::ThemeMode::Omarchy,
+            mode: nyx_theme::ThemeMode::Omarchy,
             theme: "tokyo-night".into(),
             glow: true,
             reduce_motion: false,
@@ -21,4 +21,4 @@ impl Default for Prefs {
         }
     }
 }
-nixe_core::prefs_store!(Prefs);
+nyx_core::prefs_store!(Prefs);

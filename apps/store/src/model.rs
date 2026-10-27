@@ -90,6 +90,6 @@ pub fn protected(name: &str) -> bool {
                 | "limine"
                 | "grub"
                 | "mesa"
-                | "nixe-store"
+                | "nyx-store"
         )
 }

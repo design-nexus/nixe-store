@@ -284,7 +284,7 @@ pub fn start(request: Request, send: async_channel::Sender<Event>, confirmation:
     let result = (|| -> Result<()> {
         ensure!(
             Path::new(repositories::HELPER).exists(),
-            "Store's system helper is not installed. Run ./install.sh store from the Nixe checkout."
+            "Store's system helper is not installed. Run ./install.sh store from the Nyx checkout."
         );
         let mut child = Command::new("/usr/bin/pkexec")
             .arg(repositories::HELPER)

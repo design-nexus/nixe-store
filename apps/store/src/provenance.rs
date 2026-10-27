@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn reconcile_partial_commit_and_external_changes() {
         let dir = std::env::temp_dir().join(format!(
-            "nixe-store-journal-{}-{}",
+            "nyx-store-journal-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));

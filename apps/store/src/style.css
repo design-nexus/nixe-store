@@ -14,7 +14,7 @@
 
 .store-window .store-frame { background: @theme_bg; }
 
-/* Home uses the app-store editorial layout within Nixe's shared chrome. */
+/* Home uses the app-store editorial layout within Nyx's shared chrome. */
 .store-window .feature-hero {
   padding: 0;
   border-radius: 10px;

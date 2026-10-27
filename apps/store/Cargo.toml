@@ -1,15 +1,15 @@
 [package]
-name = "nixe-store"
+name = "nyx-store"
 version = "0.1.0"
 edition = "2024"
 description = "A native app store for Omarchy with source-preserving package management"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/design-nexus/nixe-store"
+repository = "https://github.com/design-nexus/nyx-store"
 
 [dependencies]
-nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c" }
-nixe-ui = { git = "https://github.com/design-nexus/nixe-design.git", rev = "b8204de80644e263e32783602f2e0ae393578c9e" }
-nixe-theme = { git = "https://github.com/design-nexus/nixe-design.git", rev = "b8204de80644e263e32783602f2e0ae393578c9e" }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 alpm = "5.0.2"
 alpm-utils = "5.0.0"
@@ -27,9 +27,9 @@ toml = "1.1.6"
 ureq = { version = "3", features = ["json"] }
 
 [[bin]]
-name = "nixe-store"
+name = "nyx-store"
 path = "src/main.rs"
 
 [[bin]]
-name = "nixe-store-helper"
-path = "src/bin/nixe-store-helper.rs"
+name = "nyx-store-helper"
+path = "src/bin/nyx-store-helper.rs"

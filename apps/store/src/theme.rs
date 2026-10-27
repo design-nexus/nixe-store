@@ -1,7 +1,7 @@
 use crate::prefs;
-pub use nixe_theme::*;
+pub use nyx_theme::*;
 pub fn install() {
-    nixe_theme::install(Style {
+    nyx_theme::install(Style {
         window_class: "store-window",
         base_skip: &[],
         css: include_str!("style.css"),

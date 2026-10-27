@@ -1,4 +1,4 @@
-use nixe_store::{
+use nyx_store::{
     model::{Event, Request},
     transaction,
 };
