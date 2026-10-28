@@ -101,10 +101,10 @@ fn main() -> glib::ExitCode {
     if std::env::var_os("GSK_RENDERER").is_none() {
         unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
     }
-    let app = gtk::Application::builder()
-        .application_id("io.github.design_nexus.nyx.Store")
-        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
-        .build();
+    // Developer aid: a different id gives a separate instance (a test copy on a virtual
+    // monitor), so it doesn't hand its arguments to the copy that's open.
+    let id = std::env::var("NYX_STORE_APP_ID").unwrap_or_else(|_| "io.github.design_nexus.nyx.Store".to_string());
+    let app = gtk::Application::builder().application_id(id).flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE).build();
     app.connect_command_line(|app, cli| {
         let args: Vec<_> = cli.arguments().iter().map(|a| a.to_string_lossy().to_string()).collect();
         let value = |key| args.iter().position(|a| a == key).and_then(|i| args.get(i + 1)).map(String::as_str);

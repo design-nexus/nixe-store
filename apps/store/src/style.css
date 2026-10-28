@@ -1,47 +1,253 @@
-.store-window .store-grid { padding: 2px 0; }
-.store-window .app-tile { padding: 16px; min-height: 100px; border: 1px solid @hairline; border-radius: 10px; background: transparent; }
-.store-window .app-tile:hover { background: @row_hover; }
-.store-window .app-name { font-weight: 700; }
-.store-window .app-summary { font-size: 0.88em; color: @theme_dim_text; }
-.store-window .source-tag { font-size: 0.76em; color: @theme_dim_text; }
-.store-window .collection-note { color: @theme_dim_text; font-size: 0.88em; margin-bottom: 14px; }
-.store-window .store-notice { padding: 10px 16px; border-bottom: 1px solid @hairline; color: @theme_danger; }
-.store-window .recipe { font-size: 0.88em; padding: 12px; background: alpha(@theme_shadow, 0.35); }
-.store-window .store-progress { min-height: 2px; }
+/* Store on Nyx 2.0: only Store's own parts. One surface: the filters, the pages and
+   the tiles share the window's background; cards and spacing, not lines, separate
+   them. Buttons, inputs, the sidebar, the header, banners and toasts come from the
+   shared sheets. */
+
+/* ---------- Header ---------- */
+
+.header-status {
+  font-size: 11.5px;
+  color: @theme_dim_text;
+  font-feature-settings: "tnum";
+}
+
+window.store-window .app-header button.bar-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: var(--nyx-radius-small);
+  box-shadow: none;
+}
+
+/* ---------- Filters, notices, progress ---------- */
+
+.store-window .store-toolbar {
+  min-height: 44px;
+  padding: 6px 16px 6px 20px;
+}
+
+.store-window .store-notice {
+  margin: 4px 16px 8px 20px;
+  padding: 10px 14px;
+  border-radius: var(--nyx-radius-card);
+  background: alpha(@theme_danger, 0.1);
+  color: @theme_text;
+}
+
+.store-window progressbar.store-progress trough {
+  min-height: 3px;
+  border-radius: 999px;
+  background: @track;
+  border: none;
+}
+
+.store-window progressbar.store-progress progress {
+  min-height: 3px;
+  border-radius: 999px;
+  background: @theme_accent;
+}
+
+.store-window .store-toast {
+  padding: 12px 18px;
+  margin: 16px;
+}
+
+/* ---------- Tones ---------- */
+
+/* Each category, collection and spotlight has a colour from the theme's swatches
+   (@store_<name>, defined by theme.rs), so sections tell apart at a glance. */
+
+.store-window .tone-chip, .store-window .icon-tile { border-radius: var(--nyx-radius-small); }
+.store-window .icon-tile { border-radius: var(--nyx-radius-card); }
+.store-window .tone-blue.tone-chip, .store-window .tone-blue.icon-tile { background: mix(@theme_card, @store_blue, 0.22); color: @store_blue; }
+.store-window .collection-tile.tone-blue { background: mix(@theme_card, @store_blue, 0.10); }
+.store-window .collection-tile.tone-blue:hover { background: mix(@theme_card, @store_blue, 0.17); }
+.store-window .tone-violet.tone-chip, .store-window .tone-violet.icon-tile { background: mix(@theme_card, @store_violet, 0.22); color: @store_violet; }
+.store-window .collection-tile.tone-violet { background: mix(@theme_card, @store_violet, 0.10); }
+.store-window .collection-tile.tone-violet:hover { background: mix(@theme_card, @store_violet, 0.17); }
+.store-window .tone-pink.tone-chip, .store-window .tone-pink.icon-tile { background: mix(@theme_card, @store_pink, 0.22); color: @store_pink; }
+.store-window .collection-tile.tone-pink { background: mix(@theme_card, @store_pink, 0.10); }
+.store-window .collection-tile.tone-pink:hover { background: mix(@theme_card, @store_pink, 0.17); }
+.store-window .tone-red.tone-chip, .store-window .tone-red.icon-tile { background: mix(@theme_card, @store_red, 0.22); color: @store_red; }
+.store-window .collection-tile.tone-red { background: mix(@theme_card, @store_red, 0.10); }
+.store-window .collection-tile.tone-red:hover { background: mix(@theme_card, @store_red, 0.17); }
+.store-window .tone-coral.tone-chip, .store-window .tone-coral.icon-tile { background: mix(@theme_card, @store_coral, 0.22); color: @store_coral; }
+.store-window .collection-tile.tone-coral { background: mix(@theme_card, @store_coral, 0.10); }
+.store-window .collection-tile.tone-coral:hover { background: mix(@theme_card, @store_coral, 0.17); }
+.store-window .tone-amber.tone-chip, .store-window .tone-amber.icon-tile { background: mix(@theme_card, @store_amber, 0.22); color: @store_amber; }
+.store-window .collection-tile.tone-amber { background: mix(@theme_card, @store_amber, 0.10); }
+.store-window .collection-tile.tone-amber:hover { background: mix(@theme_card, @store_amber, 0.17); }
+.store-window .tone-green.tone-chip, .store-window .tone-green.icon-tile { background: mix(@theme_card, @store_green, 0.22); color: @store_green; }
+.store-window .collection-tile.tone-green { background: mix(@theme_card, @store_green, 0.10); }
+.store-window .collection-tile.tone-green:hover { background: mix(@theme_card, @store_green, 0.17); }
+.store-window .tone-teal.tone-chip, .store-window .tone-teal.icon-tile { background: mix(@theme_card, @store_teal, 0.22); color: @store_teal; }
+.store-window .collection-tile.tone-teal { background: mix(@theme_card, @store_teal, 0.10); }
+.store-window .collection-tile.tone-teal:hover { background: mix(@theme_card, @store_teal, 0.17); }
+.store-window .tone-graphite.tone-chip, .store-window .tone-graphite.icon-tile { background: mix(@theme_card, @store_graphite, 0.22); color: @store_graphite; }
+.store-window .collection-tile.tone-graphite { background: mix(@theme_card, @store_graphite, 0.10); }
+.store-window .collection-tile.tone-graphite:hover { background: mix(@theme_card, @store_graphite, 0.17); }
+.store-window .tone-accent.tone-chip { background: mix(@theme_card, @theme_accent, 0.22); color: @theme_accent; }
+
+/* ---------- App rows ---------- */
+
+.store-window flowbox.store-grid { padding: 0; }
+
+.store-window flowbox.store-grid > flowboxchild {
+  padding: 0;
+  border-radius: var(--nyx-radius-small);
+  background: transparent;
+  transition: background 120ms ease-out;
+}
+
+.store-window flowbox.store-grid > flowboxchild:hover { background: @row_hover; }
+
+.store-window flowbox.store-grid > flowboxchild:focus-visible { box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.6); }
+
+.store-window .app-row { padding: 10px; min-height: 44px; }
+
+.store-window .app-name { font-weight: 500; }
+
+.store-window .app-line { font-size: 12px; color: @theme_dim_text; }
+
+.store-window .row-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: var(--nyx-radius-small);
+  background: alpha(@theme_accent, 0.14);
+  color: @theme_accent;
+}
+
+/* Install and Open: the same square, tinted in the accent. */
+window.store-window button.row-action {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: var(--nyx-radius-small);
+  background: mix(@theme_card, @theme_accent, 0.2);
+  color: @theme_accent;
+}
+
+window.store-window button.row-action:hover {
+  background: @theme_accent;
+  color: @theme_on_accent;
+}
+
+.store-window .row-installed { color: @theme_text_tertiary; }
+
+/* ---------- Text ---------- */
+
+.store-window .app-summary { font-size: 12.5px; color: @theme_dim_text; }
+
+.store-window .source-tag { font-size: 11.5px; color: @theme_text_tertiary; }
+
+.store-window .collection-note { color: @theme_dim_text; font-size: 12.5px; margin-bottom: 14px; }
+
+.store-window .recipe {
+  font-size: 12px;
+  padding: 12px;
+  border-radius: var(--nyx-radius-small);
+  background: @theme_card;
+}
+
 .store-window .empty-state { padding: 48px 24px; color: @theme_dim_text; }
+
 .store-window .detail-icon { margin-right: 14px; }
-.store-window .store-toast { background: @theme_surface; border: 1px solid @hairline; border-radius: 10px; padding: 12px 18px; margin: 16px; }
 
-.store-window .store-frame { background: @theme_bg; }
+/* ---------- Home ---------- */
 
-/* Home uses the app-store editorial layout within Nyx's shared chrome. */
+/* The spotlight: the app's screenshot under a shade in its colour, words on the left. */
 .store-window .feature-hero {
   padding: 0;
-  border-radius: 10px;
-  border: 1px solid alpha(@theme_accent, 0.4);
-  background: linear-gradient(125deg, mix(@theme_bg, @theme_accent, 0.30), mix(@theme_bg, @theme_highlight, 0.48));
+  border: none;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: none;
 }
-.store-window .feature-hero:hover { border-color: @theme_accent; }
-.store-window .feature-content { padding: 28px; min-height: 230px; }
+
+.store-window .feature-base { background: @theme_card; }
+
+.store-window .feature-content { padding: 32px 36px; min-height: 300px; }
+
 .store-window .feature-shade {
-  background: linear-gradient(90deg, alpha(@theme_bg, 0.96), alpha(@theme_bg, 0.72) 52%, alpha(@theme_bg, 0.15));
+  background: linear-gradient(90deg, alpha(@theme_bg, 0.94), alpha(@theme_bg, 0.72) 52%, alpha(@theme_bg, 0.12));
 }
-.store-window .feature-eyebrow { color: @theme_accent; font-size: 0.76em; font-weight: 700; letter-spacing: 1.5px; }
-.store-window .feature-title { font-size: 2.2em; font-weight: 700; color: @theme_text; }
-.store-window .feature-description { font-size: 0.96em; color: @theme_text; font-weight: 400; }
-.store-window .feature-action { padding: 8px 12px; margin-top: 6px; border-radius: 6px; background: @nav_active; color: @theme_accent; font-weight: 600; }
+
+.store-window .feature-eyebrow {
+  color: @theme_accent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.store-window .feature-hero.tone-coral .feature-base { background: mix(@theme_card, @store_coral, 0.25); }
+.store-window .feature-hero.tone-coral .feature-shade {
+  background: linear-gradient(90deg, alpha(mix(@theme_bg, @store_coral, 0.22), 0.96), alpha(mix(@theme_bg, @store_coral, 0.16), 0.78) 50%, alpha(@store_coral, 0.10));
+}
+.store-window .feature-hero.tone-coral .feature-eyebrow { color: @store_coral; }
+.store-window .feature-hero.tone-pink .feature-base { background: mix(@theme_card, @store_pink, 0.25); }
+.store-window .feature-hero.tone-pink .feature-shade {
+  background: linear-gradient(90deg, alpha(mix(@theme_bg, @store_pink, 0.22), 0.96), alpha(mix(@theme_bg, @store_pink, 0.16), 0.78) 50%, alpha(@store_pink, 0.10));
+}
+.store-window .feature-hero.tone-pink .feature-eyebrow { color: @store_pink; }
+.store-window .feature-hero.tone-blue .feature-base { background: mix(@theme_card, @store_blue, 0.25); }
+.store-window .feature-hero.tone-blue .feature-shade {
+  background: linear-gradient(90deg, alpha(mix(@theme_bg, @store_blue, 0.22), 0.96), alpha(mix(@theme_bg, @store_blue, 0.16), 0.78) 50%, alpha(@store_blue, 0.10));
+}
+.store-window .feature-hero.tone-blue .feature-eyebrow { color: @store_blue; }
+
+.store-window .feature-title { font-size: 26px; font-weight: 600; color: @theme_text; }
+
+.store-window .feature-description { font-size: 13px; color: @theme_text; }
+
+.store-window .feature-action {
+  padding: 6px 12px;
+  margin-top: 4px;
+  border-radius: var(--nyx-radius-small);
+  background: @theme_accent;
+  color: @theme_on_accent;
+  font-weight: 500;
+}
+
 .store-window .feature-app-icon { margin: 16px; }
-.store-window .feature-controls { padding: 8px 2px 14px; }
-.store-window .home-collections { margin: 0 0 6px; }
-.store-window .collection-tile { padding: 16px 12px; border: 1px solid @hairline; border-radius: 10px; }
-.store-window .collection-tile image { color: @theme_accent; }
-.store-window .collection-create { background: linear-gradient(135deg, alpha(@theme_accent, 0.23), alpha(@theme_highlight, 0.25)); }
-.store-window .collection-work { background: linear-gradient(45deg, alpha(@theme_muted, 0.36), alpha(@theme_accent, 0.10)); }
-.store-window .collection-play { background: linear-gradient(135deg, alpha(@theme_highlight, 0.48), alpha(@theme_accent, 0.28)); }
-.store-window .collection-develop { background: linear-gradient(45deg, alpha(@theme_accent, 0.12), alpha(@theme_muted, 0.38)); }
-.store-window .collection-tile:hover { border-color: @theme_accent; }
-.store-window .home-collection-heading { margin-top: 26px; margin-bottom: 10px; }
-.store-window .home-section-title { color: @theme_text; font-size: 1.14em; font-weight: 600; }
-.store-window .settings-page.narrow .feature-content { padding: 20px; }
+
+.store-window .feature-controls { padding: 8px 0 16px 2px; }
+
+.store-window .page-dot {
+  min-width: 6px;
+  min-height: 6px;
+  border-radius: 999px;
+  background: @track;
+  transition: background 200ms ease-out, min-width 200ms ease-out;
+}
+
+.store-window .page-dot.current { min-width: 18px; background: @theme_accent; }
+
+/* Collections and categories: short tiles tinted in their colour. */
+.store-window .home-collections { margin: 0 0 4px; }
+
+.store-window .collection-tile {
+  padding: 12px 14px;
+  border: none;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: none;
+  transition: background 120ms ease-out;
+}
+
+.store-window .collection-name { font-size: 13.5px; font-weight: 600; color: @theme_text; }
+
+.store-window .collection-count { font-size: 11.5px; color: @theme_dim_text; font-feature-settings: "tnum"; }
+
+/* A shelf: its chip, title and note over its apps. */
+.store-window .shelf-head { margin-top: 30px; margin-bottom: 8px; }
+
+.store-window .shelf-title { font-size: 15px; font-weight: 600; color: @theme_text; }
+
+.store-window .shelf-note { font-size: 12.5px; color: @theme_dim_text; }
+
+/* ---------- Narrow ---------- */
+
+.store-window .settings-page.narrow .feature-content { padding: 22px; min-height: 240px; }
 .store-window .settings-page.narrow .feature-app-icon { margin: 4px; }
-.store-window .settings-page.narrow .feature-title { font-size: 1.8em; }
+.store-window .settings-page.narrow .feature-title { font-size: 22px; }

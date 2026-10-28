@@ -1,4 +1,5 @@
-//! Store discovery uses the suite's frame and palette, with editorial app-store content.
+//! Home: the spotlight, the collections and shelves of apps, each section in its own
+//! colour from the theme's swatches.
 use super::*;
 
 pub(super) fn render(catalog: &Catalog) {
@@ -16,12 +17,11 @@ pub(super) fn render(catalog: &Catalog) {
     }
     featured(&apps);
     collections(&apps);
-    heading("Everyday essentials", "A few great places to start. Handpicked from Arch.");
     let picks: Vec<App> = ["firefox", "libreoffice-fresh", "keepassxc", "vlc", "signal-desktop", "obsidian"]
         .iter()
         .filter_map(|name| apps.iter().find(|a| a.package == *name).cloned())
         .collect();
-    grid(&picks);
+    shelf("Everyday essentials", "A few great places to start, handpicked from Arch.", "starred-symbolic", "accent", &picks, None);
     for (category, title, copy) in [
         ("Graphics", "Make something extraordinary", "From the first sketch to the final frame."),
         ("Audio & video", "Your own creative studio", "Record it. Cut it. Share it with the world."),
@@ -31,26 +31,42 @@ pub(super) fn render(catalog: &Catalog) {
         let mut selection: Vec<App> = apps.iter().filter(|a| a.category == category).cloned().collect();
         selection.sort_by_key(|a| !a.popular);
         selection.truncate(6);
-        if selection.is_empty() {
-            continue;
-        }
-        let header = widgets::hbox(8);
-        header.add_css_class("home-collection-heading");
-        let title = widgets::label(title, "home-section-title");
-        title.set_wrap(true);
-        title.set_xalign(0.0);
-        title.set_hexpand(true);
-        header.append(&title);
-        let more = button("See all →", move || category_page(category));
-        more.add_css_class("bar-button");
-        header.append(&more);
-        ui().body.append(&header);
-        let note = widgets::label(copy, "collection-note");
-        note.set_xalign(0.0);
-        note.set_wrap(true);
-        ui().body.append(&note);
-        grid(&selection);
+        shelf(title, copy, category_icon(category), theme::tone(category), &selection, Some(category));
     }
+}
+
+fn category_icon(category: &str) -> &'static str {
+    catalog::CATEGORIES.iter().find(|(c, _)| *c == category).map(|(_, i)| *i).unwrap_or("view-app-grid-symbolic")
+}
+
+/// A section of apps: its chip, title and note, See all for a category, then the apps.
+fn shelf(title: &str, note: &str, icon: &str, tone: &str, apps: &[App], see_all: Option<&'static str>) {
+    if apps.is_empty() {
+        return;
+    }
+    let header = widgets::hbox(12);
+    header.add_css_class("shelf-head");
+    header.append(&tone_chip(icon, tone, 30));
+    let words = widgets::vbox(1);
+    words.set_hexpand(true);
+    words.set_valign(gtk::Align::Center);
+    let t = widgets::label(title, "shelf-title");
+    t.set_xalign(0.0);
+    t.set_wrap(true);
+    words.append(&t);
+    let n = widgets::label(note, "shelf-note");
+    n.set_xalign(0.0);
+    n.set_wrap(true);
+    words.append(&n);
+    header.append(&words);
+    if let Some(category) = see_all {
+        let more = widgets::bar_button("go-next-symbolic", &format!("See all {}", category.to_lowercase()));
+        more.connect_clicked(move |_| category_page(category));
+        more.set_valign(gtk::Align::Center);
+        header.append(&more);
+    }
+    ui().body.append(&header);
+    grid(apps);
 }
 
 fn category_page(category: &str) {
@@ -63,13 +79,13 @@ fn category_page(category: &str) {
 }
 
 fn featured(apps: &[App]) {
-    let scenes: Vec<(&App, &str, &str)> = [
-        ("blender", "MAKE SOMETHING BIG", "Bring your imagination into another dimension."),
-        ("krita", "A CANVAS WITHOUT LIMITS", "A whole studio of brushes. One blank canvas. Your next idea."),
-        ("obs-studio", "READY FOR YOUR CLOSE-UP", "Turn your screen into a studio, and your ideas into a broadcast."),
+    let scenes: Vec<(&App, &str, &str, &str)> = [
+        ("blender", "MAKE SOMETHING BIG", "Bring your imagination into another dimension.", "coral"),
+        ("krita", "A CANVAS WITHOUT LIMITS", "A whole studio of brushes. One blank canvas. Your next idea.", "pink"),
+        ("obs-studio", "READY FOR YOUR CLOSE-UP", "Turn your screen into a studio, and your ideas into a broadcast.", "blue"),
     ]
     .into_iter()
-    .filter_map(|(package, title, copy)| apps.iter().find(|a| a.package == package).map(|a| (a, title, copy)))
+    .filter_map(|(package, title, copy, tone)| apps.iter().find(|a| a.package == package).map(|a| (a, title, copy, tone)))
     .collect();
     if scenes.is_empty() {
         return;
@@ -78,15 +94,17 @@ fn featured(apps: &[App]) {
     stack.set_hexpand(true);
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
     stack.set_transition_duration(if prefs::get().reduce_motion { 0 } else { 160 });
-    for (index, (app, title, copy)) in scenes.iter().enumerate() {
+    for (index, (app, title, copy, tone)) in scenes.iter().enumerate() {
         let tile = gtk::Button::new();
         tile.add_css_class("feature-hero");
+        tile.add_css_class(&format!("tone-{tone}"));
+        tile.set_overflow(gtk::Overflow::Hidden);
         tile.set_tooltip_text(Some(&format!("Explore {}", app.name)));
         let overlay = gtk::Overlay::new();
         overlay.set_overflow(gtk::Overflow::Hidden);
         let row = widgets::hbox(12);
         row.add_css_class("feature-content");
-        let words = widgets::vbox(10);
+        let words = widgets::vbox(8);
         words.set_hexpand(true);
         words.set_valign(gtk::Align::Center);
         let eyebrow = widgets::label(title, "feature-eyebrow");
@@ -112,8 +130,7 @@ fn featured(apps: &[App]) {
         tag.set_xalign(0.0);
         words.append(&tag);
         row.append(&words);
-        let art = app_icon(app);
-        art.set_pixel_size(100);
+        let art = app_icon(app, 96);
         art.add_css_class("feature-app-icon");
         art.set_valign(gtk::Align::Center);
         row.append(&art);
@@ -121,6 +138,7 @@ fn featured(apps: &[App]) {
         backdrop.set_can_shrink(true);
         backdrop.set_content_fit(gtk::ContentFit::Cover);
         let base = widgets::hbox(0);
+        base.add_css_class("feature-base");
         overlay.set_child(Some(&base));
         overlay.add_overlay(&backdrop);
         // Overlays never contribute the screenshot's natural width to the window.
@@ -136,58 +154,80 @@ fn featured(apps: &[App]) {
         stack.add_named(&tile, Some(&index.to_string()));
     }
     ui().body.append(&stack);
-    let controls = widgets::hbox(8);
+
+    // Under the spotlight: a dot per app, the current one lit, and the arrows.
+    let controls = widgets::hbox(6);
     controls.add_css_class("feature-controls");
-    let label = widgets::label("THE SPOTLIGHT", "source-tag");
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    controls.append(&label);
+    let dots = widgets::hbox(6);
+    dots.add_css_class("page-dots");
+    dots.set_hexpand(true);
+    dots.set_valign(gtk::Align::Center);
     let count = scenes.len();
+    let marks: Vec<gtk::Box> = (0..count)
+        .map(|i| {
+            let dot = widgets::hbox(0);
+            dot.add_css_class("page-dot");
+            if i == 0 {
+                dot.add_css_class("current");
+            }
+            dots.append(&dot);
+            dot
+        })
+        .collect();
+    controls.append(&dots);
     let current = Rc::new(Cell::new(0usize));
-    let position = widgets::label(&format!("01 / {count:02}"), "source-tag");
+    let marks = Rc::new(marks);
     for (icon, tip, forwards) in
         [("go-previous-symbolic", "Previous featured app", false), ("go-next-symbolic", "Next featured app", true)]
     {
         let arrow = widgets::bar_button(icon, tip);
-        let (stack, current, position) = (stack.clone(), current.clone(), position.clone());
+        let (stack, current, marks) = (stack.clone(), current.clone(), marks.clone());
         arrow.connect_clicked(move |_| {
             let index = if forwards { (current.get() + 1) % count } else { (current.get() + count - 1) % count };
+            marks[current.get()].remove_css_class("current");
+            marks[index].add_css_class("current");
             current.set(index);
             stack.set_visible_child_name(&index.to_string());
-            position.set_text(&format!("{:02} / {count:02}", index + 1));
         });
         controls.append(&arrow);
     }
-    controls.append(&position);
     ui().body.append(&controls);
 }
 
+/// Four ways in, each a short tile in its category's colour.
 fn collections(apps: &[App]) {
     let grid = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .min_children_per_line(2)
         .max_children_per_line(4)
-        .column_spacing(10)
-        .row_spacing(10)
+        .column_spacing(12)
+        .row_spacing(12)
         .homogeneous(true)
         .build();
     grid.add_css_class("home-collections");
-    for (title, category, icon, class) in [
-        ("Create", "Graphics", "applications-graphics-symbolic", "collection-create"),
-        ("Work", "Productivity", "accessories-text-editor-symbolic", "collection-work"),
-        ("Play", "Games", "applications-games-symbolic", "collection-play"),
-        ("Develop", "Development", "utilities-terminal-symbolic", "collection-develop"),
+    for (title, category, icon) in [
+        ("Create", "Graphics", "applications-graphics-symbolic"),
+        ("Work", "Productivity", "accessories-text-editor-symbolic"),
+        ("Play", "Games", "applications-games-symbolic"),
+        ("Develop", "Development", "utilities-terminal-symbolic"),
     ] {
+        let tone = theme::tone(category);
         let tile = button(title, move || category_page(category));
         tile.add_css_class("collection-tile");
-        tile.add_css_class(class);
-        let content = widgets::vbox(8);
-        let icon = gtk::Image::from_icon_name(icon);
-        icon.set_pixel_size(28);
-        content.append(&icon);
-        content.append(&widgets::label(title, "app-name"));
+        tile.add_css_class(&format!("tone-{tone}"));
+        tile.set_tooltip_text(Some(&format!("Browse {}", category.to_lowercase())));
+        let content = widgets::hbox(12);
+        content.append(&tone_chip(icon, tone, 36));
+        let words = widgets::vbox(1);
+        words.set_valign(gtk::Align::Center);
+        let name = widgets::label(title, "collection-name");
+        name.set_xalign(0.0);
+        words.append(&name);
         let count = apps.iter().filter(|a| a.category == category).count();
-        content.append(&widgets::label(&format!("{count} apps"), "source-tag"));
+        let n = widgets::label(&format!("{count} apps"), "collection-count");
+        n.set_xalign(0.0);
+        words.append(&n);
+        content.append(&words);
         tile.set_child(Some(&content));
         grid.insert(&tile, -1);
     }

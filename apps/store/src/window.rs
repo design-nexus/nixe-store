@@ -41,11 +41,13 @@ struct Ui {
     window: gtk::ApplicationWindow,
     overlay: gtk::Overlay,
     nav: gtk::Box,
-    head: gtk::Box,
+    header: chrome::AppHeader,
     nav_buttons: Vec<(String, gtk::Button)>,
     body: gtk::Box,
     scroll: gtk::ScrolledWindow,
     search: gtk::SearchEntry,
+    /// The source filter and Include packages, shown on the pages they filter.
+    toolbar: gtk::Box,
     source: gtk::DropDown,
     packages: gtk::CheckButton,
     status: gtk::Label,
@@ -83,24 +85,20 @@ pub fn present(app: &gtk::Application, section: Option<&str>, query: Option<&str
         navigate(section);
     }
     if let Some(q) = query {
-        u.search.set_visible(true);
         u.search.set_text(q);
         navigate("search");
     }
     u.window.present();
-    if let Some(out) = std::env::var_os("STORE_SNAPSHOT") {
-        snapshot(std::path::PathBuf::from(out));
-    }
 }
+
+/// The search's width in characters, in a full window and a narrow one.
+const SEARCH_WIDE: i32 = 30;
+const SEARCH_NARROW: i32 = 14;
 
 fn build(app: &gtk::Application) {
     theme::install();
-    let window = gtk::ApplicationWindow::builder()
-        .application(app)
-        .default_width(std::env::var("STORE_SNAPSHOT_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1120))
-        .default_height(800)
-        .title("Store")
-        .build();
+    let window =
+        gtk::ApplicationWindow::builder().application(app).default_width(1280).default_height(800).title("Store").build();
     window.set_titlebar(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
     window.add_css_class("store-window");
     let overlay = gtk::Overlay::new();
@@ -112,8 +110,6 @@ fn build(app: &gtk::Application) {
     let nav = widgets::vbox(0);
     nav.add_css_class("settings-navigation");
     nav.set_hexpand(false);
-    let head = chrome::sidebar_head("Store", Some("Search apps (Ctrl+F)"));
-    nav.append(&head.root);
     let list = widgets::vbox(0);
     list.set_hexpand(false);
     let mut nav_buttons = Vec::new();
@@ -147,23 +143,19 @@ fn build(app: &gtk::Application) {
     column.add_css_class("settings-content");
     column.set_hexpand(true);
     let search = gtk::SearchEntry::new();
-    search.set_placeholder_text(Some("Search apps and AUR…"));
-    search.set_visible(false);
-    column.append(&chrome::search_strip(&search));
+    search.set_placeholder_text(Some("Search apps and AUR  (Ctrl+F)"));
+    search.add_css_class("bar-search");
+    search.set_width_chars(SEARCH_WIDE);
+    search.update_property(&[gtk::accessible::Property::Label("Search apps and AUR")]);
+    search.connect_stop_search(|e| e.set_text(""));
     let toolbar = widgets::hbox(8);
-    toolbar.add_css_class("toolbar");
+    toolbar.add_css_class("store-toolbar");
     let source = gtk::DropDown::from_strings(&["All sources", "AUR"]);
     source.set_tooltip_text(Some("Filter by repository"));
     toolbar.append(&source);
     let packages = gtk::CheckButton::with_label("Include packages");
     packages.set_tooltip_text(Some("Include command-line tools, libraries and system packages in search"));
     toolbar.append(&packages);
-    let space = widgets::hbox(0);
-    space.set_hexpand(true);
-    toolbar.append(&space);
-    let refresh_button = widgets::bar_button("view-refresh-symbolic", "Refresh catalog (Ctrl+R)");
-    refresh_button.connect_clicked(|_| refresh(true));
-    toolbar.append(&refresh_button);
     column.append(&toolbar);
     let notice_label = widgets::label("", "store-notice");
     notice_label.set_wrap(true);
@@ -186,27 +178,36 @@ fn build(app: &gtk::Application) {
         .build();
     column.append(&scroll);
     body_row.append(&column);
-    frame.append(&body_row);
-    let bar = widgets::hbox(8);
-    bar.add_css_class("status-bar");
-    let help = gtk::Button::with_label("F1 Shortcuts");
-    help.add_css_class("bar-button");
-    help.connect_clicked(|_| shortcuts());
-    bar.append(&help);
-    let status = widgets::label("Loading apps…", "dim");
+
+    // ----- Header -----
+    // The app and the page, the sidebar toggle; the search in the middle; what the
+    // catalog holds or the operation under way, Refresh and Settings at the end.
+    let header = chrome::app_header(&window, "system-software-install-symbolic", "Store");
+    let collapse = widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
+    collapse.connect_clicked(|_| toggle_sidebar());
+    header.start.append(&collapse);
+    header.center.append(&search);
+    header.end.set_spacing(4);
+    let status = widgets::label("Loading apps…", "header-status");
     status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    status.set_hexpand(true);
-    status.set_xalign(1.0);
-    bar.append(&status);
+    status.set_max_width_chars(48);
+    status.set_margin_end(6);
+    header.end.append(&status);
     let spinner = gtk::Spinner::new();
-    bar.append(&spinner);
-    let cancel_button = button("Cancel", cancel_operation);
+    header.end.append(&spinner);
+    let cancel_button = widgets::bar_button("process-stop-symbolic", "Cancel before installation");
+    cancel_button.connect_clicked(|_| cancel_operation());
     cancel_button.set_visible(false);
-    bar.append(&cancel_button);
-    bar.append(&chrome::gear(settings));
-    frame.append(&bar);
+    header.end.append(&cancel_button);
+    let refresh_button = widgets::bar_button("view-refresh-symbolic", "Refresh catalog (Ctrl+R)");
+    refresh_button.connect_clicked(|_| refresh(true));
+    header.end.append(&refresh_button);
+    header.end.append(&chrome::settings_button(settings));
+    frame.append(&header.root);
+    frame.append(&body_row);
     overlay.set_child(Some(&frame));
     let toast_label = widgets::label("", "store-toast");
+    toast_label.add_css_class("toast");
     toast_label.set_wrap(true);
     toast_label.set_halign(gtk::Align::Center);
     toast_label.set_valign(gtk::Align::End);
@@ -220,11 +221,12 @@ fn build(app: &gtk::Application) {
         window: window.clone(),
         overlay: overlay.clone(),
         nav: nav.clone(),
-        head: head.root.clone(),
+        header,
         nav_buttons,
         body,
         scroll,
         search: search.clone(),
+        toolbar,
         source: source.clone(),
         packages: packages.clone(),
         status,
@@ -248,8 +250,6 @@ fn build(app: &gtk::Application) {
         queue: RefCell::new(VecDeque::new()),
     });
     UI.with(|v| *v.borrow_mut() = Some(u.clone()));
-    head.toggle.connect_clicked(|_| toggle_sidebar());
-    head.search.unwrap().connect_clicked(|_| find());
     source.connect_selected_notify(|_| {
         if selected_source().is_some() && ui().page.borrow().as_str() == "home" {
             navigate("search");
@@ -320,7 +320,7 @@ fn build(app: &gtk::Application) {
                 } else {
                     let u = ui();
                     u.search.set_text("");
-                    u.search.set_visible(false);
+                    gtk::prelude::GtkWindowExt::set_focus(&u.window, None::<&gtk::Widget>);
                     navigate("home");
                 }
             }
@@ -364,9 +364,7 @@ fn build(app: &gtk::Application) {
 }
 
 fn find() {
-    let u = ui();
-    u.search.set_visible(true);
-    u.search.grab_focus();
+    ui().search.grab_focus();
 }
 fn toggle_sidebar() {
     prefs::update(|p| p.sidebar_collapsed = !p.sidebar_collapsed);
@@ -382,7 +380,6 @@ fn responsive() {
     } else {
         u.nav.remove_css_class("compact");
     }
-    chrome::set_head_compact(&u.head, compact);
     fn hide(widget: &gtk::Widget, compact: bool) {
         if widget.has_css_class("nav-item")
             && let Some(content) = widget.downcast_ref::<gtk::Button>().and_then(|b| b.child()) {
@@ -398,11 +395,24 @@ fn responsive() {
         }
     }
     hide(u.nav.upcast_ref(), compact);
-    if width > 0 && width < 980 {
+    // Narrow windows (a tiled half-screen) get a shorter search and no catalog counts.
+    let narrow = width > 0 && width < 980;
+    if narrow {
         u.body.add_css_class("narrow");
     } else {
         u.body.remove_css_class("narrow");
     }
+    let columns = grid_columns();
+    let mut child = u.body.first_child();
+    while let Some(c) = child {
+        if let Some(grid) = c.downcast_ref::<gtk::FlowBox>().filter(|g| g.has_css_class("store-grid")) {
+            grid.set_min_children_per_line(columns);
+        }
+        child = c.next_sibling();
+    }
+    u.search.set_width_chars(if narrow { SEARCH_NARROW } else { SEARCH_WIDE });
+    u.search.set_placeholder_text(Some(if narrow { "Search apps" } else { "Search apps and AUR  (Ctrl+F)" }));
+    u.status.set_visible(!narrow || u.busy.get() || u.loading.get());
     u.packages.set_label(Some(if width > 0 && width < 900 { "Packages" } else { "Include packages" }));
 }
 fn navigate(page: &str) {
@@ -438,6 +448,7 @@ fn busy(on: bool) {
     u.cancel_button.set_visible(on && !u.committed.get());
     u.spinner.set_spinning(on || u.loading.get());
     u.progress.set_visible(on);
+    u.status.set_visible(on || !u.body.has_css_class("narrow"));
     if on {
         u.progress.pulse();
     }
@@ -452,7 +463,7 @@ fn refresh(network: bool) {
     u.status.set_text(if network { "Refreshing apps and repository metadata…" } else { "Loading apps…" });
     notice("");
     let cache = nyx_core::paths::cache_dir();
-    let bootstrap = !network && !cache.join("appstream.pkg.tar.zst").exists() && std::env::var_os("STORE_SNAPSHOT").is_none();
+    let bootstrap = !network && !cache.join("appstream.pkg.tar.zst").exists();
     let (tx, rx) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let _ = tx.send_blocking(catalog::load(&cache, network).map_err(|e| e.to_string()));
@@ -549,7 +560,15 @@ fn render() {
             b.remove_css_class("active");
         }
     }
-    chrome::set_title(&u.window, "Store", PAGES.iter().find(|p| p.0 == page).map(|p| p.1).unwrap_or("Search"));
+    let title = PAGES.iter().find(|p| p.0 == page).map(|p| p.1).unwrap_or("Search");
+    chrome::set_title(&u.window, "Store", title);
+    u.header.set_subtitle(title);
+    let filters = match page.as_str() {
+        "search" | "installed" => true,
+        "categories" => !u.category.borrow().is_empty(),
+        _ => false,
+    };
+    u.toolbar.set_visible(filters);
     let c = u.catalog.borrow();
     let Some(c) = c.as_ref() else {
         text("Loading your app catalog…");
@@ -562,18 +581,29 @@ fn render() {
             heading("Categories", "Find the right app for what you want to do.");
             let grid = gtk::FlowBox::builder()
                 .selection_mode(gtk::SelectionMode::None)
-                .min_children_per_line(1)
-                .max_children_per_line(3)
+                .min_children_per_line(2)
+                .max_children_per_line(4)
                 .column_spacing(12)
                 .row_spacing(12)
                 .homogeneous(true)
                 .build();
             for &(name, icon) in catalog::CATEGORIES {
+                let tone = theme::tone(name);
                 let tile = gtk::Button::new();
-                tile.add_css_class("app-tile");
+                tile.add_css_class("collection-tile");
+                tile.add_css_class(&format!("tone-{tone}"));
                 let row = widgets::hbox(12);
-                row.append(&gtk::Image::from_icon_name(icon));
-                row.append(&widgets::label(name, "app-name"));
+                row.append(&tone_chip(icon, tone, 36));
+                let count = c.apps.iter().filter(|a| a.desktop && a.category == name).map(|a| &a.package).collect::<BTreeSet<_>>().len();
+                let words = widgets::vbox(1);
+                words.set_valign(gtk::Align::Center);
+                let title = widgets::label(name, "collection-name");
+                title.set_xalign(0.0);
+                words.append(&title);
+                let n = widgets::label(&format!("{count} apps"), "collection-count");
+                n.set_xalign(0.0);
+                words.append(&n);
+                row.append(&words);
                 tile.set_child(Some(&row));
                 tile.connect_clicked(move |_| {
                     *ui().category.borrow_mut() = name.into();
@@ -654,51 +684,127 @@ fn render() {
     }
 }
 
+/// Apps as compact rows in up to three columns: the icon, the name and one line about
+/// it, and Install or Open at the end. A row opens the app's details.
 fn grid(apps: &[App]) {
     let grid = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
-        .min_children_per_line(1)
+        .activate_on_single_click(true)
+        .min_children_per_line(grid_columns())
         .max_children_per_line(3)
-        .column_spacing(12)
-        .row_spacing(12)
+        .column_spacing(16)
+        .row_spacing(4)
         .homogeneous(true)
         .build();
     grid.add_css_class("store-grid");
-    for app in apps.iter().take(200) {
-        let tile = gtk::Button::new();
-        tile.add_css_class("app-tile");
-        tile.set_tooltip_text(Some(&format!("{} · {}", app.name, app.source)));
+    let searching = ui().page.borrow().as_str() == "search";
+    let shown: Vec<App> = apps.iter().take(200).cloned().collect();
+    for app in &shown {
         let row = widgets::hbox(12);
-        let icon = app_icon(app);
-        icon.set_pixel_size(40);
-        icon.set_valign(gtk::Align::Start);
+        row.add_css_class("app-row");
+        // Narrow enough for two columns in a tiled half-screen window.
+        row.set_size_request(250, -1);
+        if !app.summary.is_empty() {
+            row.set_tooltip_text(Some(&app.summary));
+        }
+        let icon = app_icon(app, 44);
+        icon.set_valign(gtk::Align::Center);
         row.append(&icon);
-        let column = widgets::vbox(6);
-        column.set_hexpand(true);
+        let text = widgets::vbox(2);
+        text.set_hexpand(true);
+        text.set_valign(gtk::Align::Center);
+        // Capped natural widths, so long summaries don't cost the grid its columns.
         let name = widgets::label(&app.name, "app-name");
         name.set_xalign(0.0);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        name.set_max_width_chars(24);
-        column.append(&name);
-        let summary = widgets::label(&app.summary, "app-summary");
-        summary.set_xalign(0.0);
-        summary.set_wrap(true);
-        summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        summary.set_lines(2);
-        summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        summary.set_max_width_chars(26);
-        column.append(&summary);
-        let tag =
-            widgets::label(&format!("{}{}", app.source, if app.installed.is_some() { " · Installed" } else { "" }), "source-tag");
-        tag.set_xalign(0.0);
-        column.append(&tag);
-        row.append(&column);
-        tile.set_child(Some(&row));
-        let app = app.clone();
-        tile.connect_clicked(move |_| details(app.clone()));
-        grid.insert(&tile, -1);
+        name.set_max_width_chars(22);
+        text.append(&name);
+        let line = widgets::hbox(6);
+        let about = widgets::label(if app.summary.is_empty() { &app.category } else { &app.summary }, "app-line");
+        about.set_xalign(0.0);
+        about.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        about.set_max_width_chars(26);
+        about.set_hexpand(true);
+        line.append(&about);
+        if app.source == "aur" {
+            line.append(&widgets::label("AUR", "row-tag"));
+        }
+        if searching && app.installed.is_some() {
+            line.append(&widgets::label("Installed", "row-tag"));
+        }
+        text.append(&line);
+        row.append(&text);
+        row.append(&row_action(app));
+        grid.insert(&row, -1);
     }
+    grid.connect_child_activated(move |_, child| {
+        if let Some(app) = shown.get(child.index() as usize) {
+            details(app.clone());
+        }
+    });
     ui().body.append(&grid);
+}
+
+/// How many columns of app rows fit the page: three in a full window, two in a tiled
+/// half-screen one. Set from the width, since the grid would go by its rows' natural
+/// widths and give up columns to long summaries.
+fn grid_columns() -> u32 {
+    let u = ui();
+    let width = if u.window.width() > 0 { u.window.width() } else { u.window.default_width() };
+    let sidebar = if u.nav.has_css_class("compact") { 56 } else { 212 };
+    let content = width - sidebar - 48;
+    ((content + 16) / (250 + 16)).clamp(1, 3) as u32
+}
+
+/// What a row does directly: Install an app that isn't installed, Open one that is,
+/// or a check for an installed app without a launcher.
+fn row_action(app: &App) -> gtk::Widget {
+    if app.installed.is_some() {
+        if app.desktop_id.is_empty() {
+            let done = gtk::Image::from_icon_name("object-select-symbolic");
+            done.add_css_class("row-installed");
+            done.set_tooltip_text(Some("Installed"));
+            done.set_size_request(32, 32);
+            return done.upcast();
+        }
+        let open = widgets::bar_button("media-playback-start-symbolic", &format!("Open {}", app.name));
+        open.add_css_class("row-action");
+        open.set_valign(gtk::Align::Center);
+        let a = app.clone();
+        open.connect_clicked(move |_| launch(&a));
+        return open.upcast();
+    }
+    let tip = if app.source == "aur" { format!("Review the build of {}", app.name) } else { format!("Install {}", app.name) };
+    let get = widgets::bar_button("folder-download-symbolic", &tip);
+    get.add_css_class("row-action");
+    get.add_css_class("get");
+    get.set_valign(gtk::Align::Center);
+    get.set_sensitive(!ui().busy.get());
+    let a = app.clone();
+    get.connect_clicked(move |_| install(&a));
+    get.upcast()
+}
+
+/// Open an installed app from its launcher.
+fn launch(app: &App) {
+    let desktop = app.desktop_id.clone();
+    if let Some(info) = gio::AppInfo::all().into_iter().find(|a| a.id().is_some_and(|id| id == desktop)) {
+        if let Err(e) = info.launch(&[], None::<&gio::AppLaunchContext>) {
+            notice(&e.to_string());
+        }
+    } else {
+        notice("The app’s desktop launcher is unavailable.");
+    }
+}
+
+/// Install an app: a repository app after the review of the package changes, an AUR
+/// app after the review of its build files.
+fn install(app: &App) {
+    if app.source == "aur" {
+        review_aur(&app.package);
+    } else {
+        start_request(Request::Install { source: app.source.clone(), packages: vec![app.package.clone()] });
+    }
 }
 
 fn details(app: App) {
@@ -706,9 +812,7 @@ fn details(app: App) {
     dialog.set_default_height(620);
     let content = widgets::vbox(14);
     let head = widgets::hbox(14);
-    let icon = app_icon(&app);
-    icon.set_pixel_size(64);
-    head.append(&icon);
+    head.append(&app_icon(&app, 64));
     let info = widgets::vbox(6);
     let summary = widgets::label(&app.summary, "app-summary");
     summary.set_wrap(true);
@@ -763,17 +867,8 @@ fn details(app: App) {
     actions.append(&button("Close", move || d.close()));
     if app.installed.is_some() {
         if !app.desktop_id.is_empty() {
-            let desktop = app.desktop_id.clone();
-            let launch = button("Open", move || {
-                if let Some(app) = gio::AppInfo::all().into_iter().find(|a| a.id().is_some_and(|id| id == desktop)) {
-                    if let Err(e) = app.launch(&[], None::<&gio::AppLaunchContext>) {
-                        notice(&e.to_string());
-                    }
-                } else {
-                    notice("The app’s desktop launcher is unavailable.");
-                }
-            });
-            actions.append(&launch);
+            let a = app.clone();
+            actions.append(&button("Open", move || launch(&a)));
         }
         if !nyx_store::model::protected(&app.package) {
             let package = app.package.clone();
@@ -800,17 +895,13 @@ fn details(app: App) {
     } else {
         let d = dialog.clone();
         let a = app.clone();
-        let install = button(if app.source == "aur" { "Review build" } else { "Install" }, move || {
+        let get = button(if app.source == "aur" { "Review build" } else { "Install" }, move || {
             d.close();
-            if a.source == "aur" {
-                review_aur(&a.package);
-            } else {
-                start_request(Request::Install { source: a.source.clone(), packages: vec![a.package.clone()] });
-            }
+            install(&a);
         });
-        install.add_css_class("suggested-action");
-        install.set_sensitive(!ui().busy.get());
-        actions.append(&install);
+        get.add_css_class("suggested-action");
+        get.set_sensitive(!ui().busy.get());
+        actions.append(&get);
     }
     card.append(&actions);
     dialog.present();
@@ -836,6 +927,7 @@ fn render_updates(c: &Catalog) {
     let update = button("Review system update", || start_request(Request::Update));
     update.add_css_class("suggested-action");
     update.set_halign(gtk::Align::Start);
+    update.set_margin_top(12);
     update.set_sensitive(!ui().busy.get());
     ui().body.append(&update);
     if c.updates.is_empty() {
@@ -1421,7 +1513,7 @@ fn settings() {
         &u.window,
         nyx_ui::settings_card::Spec {
             groups: &[
-                ("Store window", "applications-graphics-symbolic", "Theme, glow, motion"),
+                ("Store window", "applications-graphics-symbolic", "Theme, accent, motion"),
                 ("Keyboard", "input-keyboard-symbolic", "Shortcuts"),
             ],
             search_text: None,
@@ -1466,11 +1558,7 @@ fn settings() {
                 swatches.append(&swatch);
             }
             g.add(&widgets::row("Current colors", "", Some(swatches.upcast_ref())));
-            let (r, _) = widgets::switch_row("Glow", "Use the suite’s accent effect preference.", p.glow, |on| {
-                prefs::update(|p| p.glow = on);
-                theme::apply();
-            });
-            g.add(&r);
+            g.add(&widgets::accent_row("store"));
             let (r, _) = widgets::switch_row("Reduce motion", "Turn off animated transitions.", p.reduce_motion, |on| {
                 prefs::update(|p| p.reduce_motion = on);
                 theme::apply();
@@ -1506,52 +1594,49 @@ fn shortcuts() {
     dialog.present();
 }
 
-fn snapshot(out: std::path::PathBuf) {
-    let u = ui();
-    u.window.set_default_size(std::env::var("STORE_SNAPSHOT_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1120), 800);
-    let ready = Cell::new(false);
-    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
-        if u.loading.get() || !ready.replace(true) {
-            return glib::ControlFlow::Continue;
-        }
-        let child = u.window.child().unwrap();
-        let paintable = gtk::WidgetPaintable::new(Some(&child));
-        let shot = gtk::Snapshot::new();
-        paintable.snapshot(&shot, child.width() as f64, child.height() as f64);
-        println!(
-            "Preview allocation: {} × {}; sidebar {} px (compact: {})",
-            child.width(),
-            child.height(),
-            u.nav.width(),
-            u.nav.has_css_class("compact")
-        );
-        if let (Some(node), Some(renderer)) = (shot.to_node(), u.window.renderer()) {
-            let texture = renderer.render_texture(&node, None);
-            match texture.save_to_png(&out) {
-                Ok(_) => println!("Saved {} × {} preview to {}", child.width(), child.height(), out.display()),
-                Err(e) => eprintln!("{e}"),
-            }
-        }
-        u.window.application().unwrap().quit();
-        glib::ControlFlow::Break
-    });
+/// A small rounded square in `tone` (a swatch name, or `accent`) with `icon` on it.
+fn tone_chip(icon: &str, tone: &str, size: i32) -> gtk::Box {
+    let chip = widgets::hbox(0);
+    chip.add_css_class("tone-chip");
+    chip.add_css_class(&format!("tone-{tone}"));
+    chip.set_size_request(size, size);
+    chip.set_hexpand(false);
+    chip.set_halign(gtk::Align::Start);
+    chip.set_valign(gtk::Align::Center);
+    let image = gtk::Image::from_icon_name(icon);
+    image.set_pixel_size(size / 2);
+    image.set_size_request(size, size);
+    chip.append(&image);
+    chip
 }
 
-fn app_icon(app: &App) -> gtk::Image {
-    let icon =
-        if app.icon.is_empty() || app.icon.starts_with("@cache:") { "application-x-executable-symbolic" } else { &app.icon };
+/// The app's icon at `size` px. An app without one shows its category's symbol on a
+/// tile in the category's colour.
+fn app_icon(app: &App, size: i32) -> gtk::Widget {
+    let cached = app.icon.starts_with("@cache:");
     let display = gdk::Display::default().unwrap();
-    let fallback = if gtk::IconTheme::for_display(&display).has_icon(icon) {
-        icon
-    } else {
-        catalog::CATEGORIES
-            .iter()
-            .find(|(category, _)| *category == app.category)
-            .map(|(_, icon)| *icon)
-            .unwrap_or("application-x-executable-symbolic")
-    };
-    let image = gtk::Image::from_icon_name(fallback);
-    if app.icon.starts_with("@cache:") {
+    let own = !app.icon.is_empty() && !cached && gtk::IconTheme::for_display(&display).has_icon(&app.icon);
+    let symbol = catalog::CATEGORIES
+        .iter()
+        .find(|(category, _)| *category == app.category)
+        .map(|(_, icon)| *icon)
+        .unwrap_or("application-x-executable-symbolic");
+    if !own && !cached {
+        let image = gtk::Image::from_icon_name(symbol);
+        image.set_pixel_size(size / 2);
+        image.set_size_request(size, size);
+        let tile = widgets::hbox(0);
+        tile.add_css_class("icon-tile");
+        tile.add_css_class(&format!("tone-{}", theme::tone(&app.category)));
+        tile.set_size_request(size, size);
+        tile.set_hexpand(false);
+        tile.set_halign(gtk::Align::Center);
+        tile.append(&image);
+        return tile.upcast();
+    }
+    let image = gtk::Image::from_icon_name(if own { &app.icon } else { symbol });
+    image.set_pixel_size(size);
+    if cached {
         let cache = nyx_core::paths::cache_dir();
         let icon = app.icon.clone();
         let (tx, rx) = async_channel::bounded(1);
@@ -1571,7 +1656,7 @@ fn app_icon(app: &App) -> gtk::Image {
                 }
         });
     }
-    image
+    image.upcast()
 }
 
 fn load_picture(app: &App, index: usize, picture: &gtk::Picture) {
