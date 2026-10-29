@@ -8,6 +8,8 @@ pub struct Prefs {
     pub reduce_motion: bool,
     pub sidebar_collapsed: bool,
     pub last_section: String,
+    pub include_aur: bool,
+    pub catalog_refresh: String,
 }
 impl Default for Prefs {
     fn default() -> Self {
@@ -18,6 +20,8 @@ impl Default for Prefs {
             reduce_motion: false,
             sidebar_collapsed: false,
             last_section: "home".into(),
+            include_aur: true,
+            catalog_refresh: "manual".into(),
         }
     }
 }

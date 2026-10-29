@@ -78,7 +78,20 @@ fn ui() -> Rc<Ui> {
 pub fn present(app: &gtk::Application, section: Option<&str>, query: Option<&str>) {
     if UI.with(|u| u.borrow().is_none()) {
         build(app);
-        refresh(false);
+        let cache = nyx_core::paths::cache_dir().join("catalog-refreshed");
+        let p = prefs::get();
+        let due = p.catalog_refresh == "startup" || (p.catalog_refresh == "daily" &&
+            cache.metadata().and_then(|m| m.modified()).ok()
+                .and_then(|t| t.elapsed().ok()).is_none_or(|age| age.as_secs() >= 86400));
+        refresh(due);
+        glib::timeout_add_seconds_local(60, || {
+            let marker = nyx_core::paths::cache_dir().join("catalog-refreshed");
+            if prefs::get().catalog_refresh == "daily" && marker.metadata().and_then(|m| m.modified()).ok()
+                .and_then(|t| t.elapsed().ok()).is_none_or(|age| age.as_secs() >= 86400) {
+                refresh(true);
+            }
+            glib::ControlFlow::Continue
+        });
     }
     let u = ui();
     if let Some(section) = section {
@@ -270,9 +283,9 @@ fn build(app: &gtk::Application) {
         let generation = u.search_generation.get() + 1;
         u.search_generation.set(generation);
         let query = entry.text().to_string();
-        if query.chars().count() >= 2 {
+        if prefs::get().include_aur && query.chars().count() >= 2 {
             glib::timeout_add_local_once(std::time::Duration::from_millis(350), move || {
-                if ui().search_generation.get() != generation {
+                if !prefs::get().include_aur || ui().search_generation.get() != generation {
                     return;
                 }
                 let (tx, rx) = async_channel::bounded(1);
@@ -281,7 +294,7 @@ fn build(app: &gtk::Application) {
                 });
                 glib::spawn_future_local(async move {
                     if let Ok(result) = rx.recv().await
-                        && ui().search_generation.get() == generation {
+                        && prefs::get().include_aur && ui().search_generation.get() == generation {
                             match result {
                                 Ok(mut apps) => {
                                     if let Some(c) = ui().catalog.borrow().as_ref() {
@@ -476,6 +489,9 @@ fn refresh(network: bool) {
             match result {
                 Ok(catalog) => {
                     let warning = catalog.warning.clone();
+                    if network && warning.is_empty() {
+                        let _ = std::fs::write(nyx_core::paths::cache_dir().join("catalog-refreshed"), b"");
+                    }
                     *u.catalog.borrow_mut() = Some(catalog);
                     update_sources();
                     notice(&warning);
@@ -1512,7 +1528,7 @@ fn settings() {
         &u.overlay,
         &u.window,
         nyx_ui::settings_card::Spec {
-            groups: &[],
+            groups: &[("Catalog", "view-grid-symbolic", "AUR results, automatic refresh")],
             search_text: None,
             standard: Some(nyx_ui::settings_card::Standard {
                 app: "store",
@@ -1533,6 +1549,26 @@ fn settings() {
         },
         || {
             let page = widgets::page("settings");
+            let wrapper = widgets::vbox(0);
+            wrapper.add_css_class("settings-group");
+            wrapper.set_widget_name("Catalog");
+            wrapper.append(&widgets::label("CATALOG", "group-title"));
+            let group = widgets::vbox(0);
+            group.add_css_class("group-list");
+            wrapper.append(&group);
+            page.body.append(&wrapper);
+            let p = prefs::get();
+            let (row, _) = widgets::switch_row("Include AUR results", "Search community packages as well as official repositories.", p.include_aur, |on| {
+                prefs::update(|p| p.include_aur = on);
+                ui().search_generation.set(ui().search_generation.get() + 1);
+                ui().aur.borrow_mut().clear();
+                render();
+            });
+            group.append(&row);
+            let (row, _) = widgets::choice_row("Refresh the catalog", "Manual refresh is always available with Ctrl+R.",
+                vec![("startup".into(), "On start".into()), ("daily".into(), "Daily".into()), ("manual".into(), "Manually".into())],
+                &p.catalog_refresh, |id| prefs::update(|p| p.catalog_refresh = id));
+            group.append(&row);
             (page.root.upcast(), page.body)
         },
     );
