@@ -28,35 +28,3 @@ pub fn page(section: &str) -> Page {
         .build();
     Page { root, body }
 }
-
-impl Page {
-    pub fn group(&self, title: &str) -> Group {
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        wrapper.add_css_class("settings-group");
-        // The settings dialog lists groups by this name.
-        wrapper.set_widget_name(title);
-        if !title.is_empty() {
-            let l = gtk::Label::new(Some(&title.to_uppercase()));
-            l.add_css_class("group-title");
-            l.set_xalign(0.0);
-            wrapper.append(&l);
-        }
-        // Rows join into one card, split by hairlines.
-        let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        list.add_css_class("group-list");
-        wrapper.append(&list);
-        self.body.append(&wrapper);
-        Group { list }
-    }
-}
-
-#[derive(Clone)]
-pub struct Group {
-    pub list: gtk::Box,
-}
-
-impl Group {
-    pub fn add(&self, w: &impl IsA<gtk::Widget>) {
-        self.list.append(w);
-    }
-}

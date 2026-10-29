@@ -25,16 +25,16 @@ const PAGES: &[(&str, &str, &str)] = &[
     ("updates", "Updates", "software-update-available-symbolic"),
     ("repositories", "Repositories", "network-server-symbolic"),
 ];
-pub const SHORTCUTS: &[(&str, &str)] = &[
-    ("Ctrl+F", "Search apps"),
-    ("Ctrl+B", "Collapse sidebar"),
-    ("Alt+Left", "Back to Home"),
-    ("Ctrl+R", "Refresh catalog"),
-    ("Ctrl+,", "Settings"),
-    ("Ctrl+Shift+P", "Command palette"),
-    ("Esc", "Close panel or clear search"),
-    ("F1 / ?", "Keyboard shortcuts"),
-    ("Ctrl+Q / Ctrl+W", "Close Store"),
+pub const SHORTCUTS: &[(&[&str], &str)] = &[
+    (&["Ctrl", "F"], "Search apps"),
+    (&["Ctrl", "B"], "Collapse sidebar"),
+    (&["Alt", "Left"], "Back to Home"),
+    (&["Ctrl", "R"], "Refresh catalog"),
+    (&["Ctrl", ","], "Settings"),
+    (&["Ctrl", "Shift", "P"], "Command palette"),
+    (&["Esc"], "Close panel or clear search"),
+    (&["F1"], "Keyboard shortcuts"),
+    (&["Ctrl", "Q"], "Close Store"),
 ];
 
 struct Ui {
@@ -1512,62 +1512,27 @@ fn settings() {
         &u.overlay,
         &u.window,
         nyx_ui::settings_card::Spec {
-            groups: &[
-                ("Store window", "applications-graphics-symbolic", "Theme, accent, motion"),
-                ("Keyboard", "input-keyboard-symbolic", "Shortcuts"),
-            ],
+            groups: &[],
             search_text: None,
+            standard: Some(nyx_ui::settings_card::Standard {
+                app: "store",
+                about: nyx_ui::settings_card::About {
+                    name: "Store",
+                    icon: "io.github.design_nexus.nyx.Store",
+                    version: env!("CARGO_PKG_VERSION"),
+                    description: "Find and install apps, keeping track of where each came from.",
+                    licence: env!("CARGO_PKG_LICENSE"),
+                    website: "https://github.com/design-nexus/nyx-store",
+                    issues: "https://github.com/design-nexus/nyx-store/issues",
+                    credits: &[],
+                },
+                shortcuts: SHORTCUTS,
+                reduce_motion: || prefs::get().reduce_motion,
+                set_reduce_motion: |on| prefs::update(|p| p.reduce_motion = on),
+            }),
         },
         || {
             let page = widgets::page("settings");
-            let g = page.group("Store window");
-            let p = prefs::get();
-            g.add(&widgets::start_row());
-            let options = theme::all().into_iter().map(|t| (t.id, t.name)).collect();
-            let (r, dd) = widgets::choice_row("Theme", "Use a bundled or custom Nyx theme.", options, &p.theme, |id| {
-                prefs::update(|p| {
-                    p.theme = id;
-                    p.mode = theme::ThemeMode::Theme;
-                });
-                theme::apply();
-            });
-            dd.set_sensitive(p.mode == theme::ThemeMode::Theme || !theme::omarchy_available());
-            if theme::omarchy_available() {
-                let (row, _) = widgets::switch_row(
-                    "Follow Omarchy theme",
-                    "Match the desktop’s colors and update live.",
-                    p.mode == theme::ThemeMode::Omarchy,
-                    move |on| {
-                        prefs::update(|p| p.mode = if on { theme::ThemeMode::Omarchy } else { theme::ThemeMode::Theme });
-                        dd.set_sensitive(!on);
-                        theme::apply();
-                    },
-                );
-                g.add(&row);
-            }
-            g.add(&r);
-            let swatches = widgets::hbox(4);
-            let palette = theme::current_palette();
-            for color in [&palette.bg, &palette.surface, &palette.muted, &palette.text, &palette.accent, &palette.danger] {
-                let swatch = widgets::hbox(0);
-                swatch.add_css_class("swatch");
-                let provider = gtk::CssProvider::new();
-                provider.load_from_string(&format!("box {{ background: {color}; }}"));
-                #[allow(deprecated)]
-                swatch.style_context().add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_USER);
-                swatches.append(&swatch);
-            }
-            g.add(&widgets::row("Current colors", "", Some(swatches.upcast_ref())));
-            g.add(&widgets::accent_row("store"));
-            let (r, _) = widgets::switch_row("Reduce motion", "Turn off animated transitions.", p.reduce_motion, |on| {
-                prefs::update(|p| p.reduce_motion = on);
-                theme::apply();
-            });
-            g.add(&r);
-            let g = page.group("Keyboard");
-            for (keys, action) in SHORTCUTS {
-                g.add(&widgets::row(action, "", Some(widgets::key_caps(&keys.split('+').collect::<Vec<_>>()).upcast_ref())));
-            }
             (page.root.upcast(), page.body)
         },
     );
@@ -1577,7 +1542,7 @@ fn shortcuts() {
     let rows = widgets::vbox(0);
     rows.add_css_class("group-list");
     for (keys, action) in SHORTCUTS {
-        rows.append(&widgets::row(action, "", Some(widgets::key_caps(&keys.split('+').collect::<Vec<_>>()).upcast_ref())));
+        rows.append(&widgets::row(action, "", Some(widgets::key_caps(keys).upcast_ref())));
     }
     let scroll = gtk::ScrolledWindow::builder()
         .child(&rows)
